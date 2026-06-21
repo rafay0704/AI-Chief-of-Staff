@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/*
+  AI Chief of Staff — design tokens.
+  A calm, premium "command desk" palette: warm ink background, off-white text,
+  a single amber accent. Deliberately not the default blue/purple AI look.
+*/
+@theme {
+  --color-ink: #0b0c0f;
+  --color-surface: #131519;
+  --color-surface-2: #1a1d23;
+  --color-border: #262a32;
+  --color-border-strong: #353a45;
+  --color-fg: #e9eaed;
+  --color-muted: #969aa6;
+  --color-faint: #6b6f7a;
+
+  --color-accent: #e3a857;
+  --color-accent-strong: #efb968;
+  --color-accent-ink: #1c1404;
+
+  --color-high: #ec7468;
+  --color-medium: #e3b357;
+  --color-low: #7f93a6;
+
+  --color-block-focus: #e3a857;
+  --color-block-rest: #5fb98a;
+  --color-block-admin: #7f93a6;
+  --color-block-meeting: #a98fe0;
+  --color-block-buffer: #6b6f7a;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-fg);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle ambient gradient behind the app shell. */
+.app-bg {
+  background:
+    radial-gradient(900px 500px at 15% -10%, rgba(227, 168, 87, 0.06), transparent 60%),
+    radial-gradient(700px 500px at 100% 0%, rgba(169, 143, 224, 0.05), transparent 55%);
+}
+
+::selection {
+  background: rgba(227, 168, 87, 0.25);
+}

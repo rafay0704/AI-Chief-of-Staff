@@ -49,6 +49,18 @@ processing list keeps it durable until explicitly acked, giving at-least-once de
 recovery. Trade-off: handlers must be **idempotent** (a job may run more than once); retry/backoff and
 dead-lettering are implemented by us rather than a library, which is the point (concurrency showcase).
 
+### ADR-010 — Frontend: Next.js `/api` rewrite proxy; hand-built UI over shadcn
+**Decision:** The Next.js app proxies `/api/*` → the Go backend via a `next.config.ts` rewrite, so the
+browser is always same-origin (no CORS, no backend change). UI is a small set of hand-built Tailwind v4
+components rather than the shadcn CLI; server state is TanStack Query, responses validated with Zod, JWT
+kept in `localStorage` behind an `AuthProvider`, route protection done client-side (no middleware).
+**Why:** The proxy keeps the backend free of CORS/auth-origin concerns and mirrors a real reverse-proxy
+deployment. Hand-built components avoid the interactive shadcn init/codegen and give a distinctive
+"command desk" look (warm ink + amber accent) instead of generic defaults. Trade-off: a few primitives
+to maintain ourselves; client-side guards mean a brief loader flash before redirect (acceptable for an
+SPA-style dashboard). Next 16 makes request APIs async-only and renames `middleware`→`proxy`; we sidestep
+both by using client-component pages.
+
 ### ADR-009 — Worker pool: dispatcher + unbuffered channel + detached ack context
 **Decision:** One dispatcher goroutine does the blocking Claim and hands deliveries to N workers over an
 **unbuffered** channel; ack/retry use a context detached from the shutdown context

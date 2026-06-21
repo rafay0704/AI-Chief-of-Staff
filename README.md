@@ -21,6 +21,8 @@ Redis-backed job queue, and a typed Claude AI layer — with a **Next.js** dashb
 
 ## Quickstart
 
+**1. Backend + infra**
+
 ```bash
 cp .env.example .env          # then edit secrets (note: .env is gitignored)
 make up                       # start Postgres + Redis (+ Adminer on :8081)
@@ -28,8 +30,20 @@ cd backend
 make tidy                     # install Go deps
 make migrate-up               # create schema
 make sqlc                     # generate typed repository code
-make run                      # start API on :8080  (live-reload if `air` installed)
+make run                      # API on :8080  (live-reload if `air` installed)
+make worker                   # second terminal: background job worker
 ```
+
+**2. Frontend** (needs the backend running)
+
+```bash
+cd frontend
+pnpm install
+pnpm dev                      # dashboard on http://localhost:3000
+```
+
+The frontend proxies `/api/*` → the backend (`:8080`), so there's no CORS setup. Open
+http://localhost:3000, register, add tasks, and hit **Generate plan**.
 
 Health check:
 

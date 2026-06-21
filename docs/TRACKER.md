@@ -10,13 +10,13 @@
 ## Current status
 
 - **Last updated:** 2026-06-22
-- **Active batch:** ✅ Batches 0–4 COMPLETE & verified — **MVP backend done**
-- **Next step:** Batch 5 — Next.js frontend dashboard
+- **Active batch:** ✅ Batches 0–5 COMPLETE & verified — **full-stack MVP done**
+- **Next step:** Batch 6 (V2, optional) — priority view, replanning, weekly reports, etc.
 
-> Batch 3 verified: AI unit tests (fake Completer) green; live Claude call (Haiku 4.5) → valid schedule.
-> Batch 4 verified 2026-06-22: full chain live — POST /plans/generate → Redis queue → worker pool →
-> Claude Planner → Postgres → fetch. Job went queued→running→done in ~4s; schedule respected
-> priorities, durations, rest blocks, and the 300-min budget.
+> Batch 4 verified: full chain live — generate → queue → worker → Claude Planner → Postgres → fetch.
+> Batch 5 verified 2026-06-22: Next.js dashboard builds clean (5 routes); ran the full flow **through
+> the frontend `/api` proxy** (register → tasks → generate → poll running→done → 4-block plan rendered).
+> Frontend runs on **:3000**, proxies `/api/*` → backend `:8080` (no CORS, no backend change).
 > Default model **claude-haiku-4-5-20251001**. Postgres host port **5433** (5432 taken locally).
 
 ---
@@ -63,11 +63,13 @@
 - [x] PlanService unit tests (fake enqueuer + querier): enqueue, idempotent re-gen, lifecycle, not-found
 - [x] **Verified:** create → generate → poll (queued→running→done) → fetch full schedule, live
 
-### ⬜ Batch 5 — Next.js Frontend
-- [ ] Next.js latest + TS + Tailwind v4 + shadcn/ui scaffold
-- [ ] Auth pages + token handling
-- [ ] Tasks dashboard (CRUD) + generate plan + schedule view + polling
-- [ ] **Verify:** full flow in browser
+### ✅ Batch 5 — Next.js Frontend
+- [x] Next.js 16 + TS + Tailwind v4 scaffold; `/api/*` rewrite proxy → backend (no CORS)
+- [x] Typed API client (`lib/api.ts`) + Zod schemas + auth context (JWT in localStorage)
+- [x] Login + register pages with validation + error handling
+- [x] Dashboard: task CRUD UI + generate-plan controls + schedule timeline + job-status polling
+- [x] Custom dark "command desk" theme (warm ink + amber accent), hand-built UI primitives
+- [x] **Verified:** `pnpm build` clean (5 routes); full flow driven through the `/api` proxy
 
 ### ⬜ Batch 6 — V2 (optional)
 - [ ] Priority view · adaptive replanning · weekly reports · stress mode · habits · memory

@@ -61,6 +61,20 @@ make test-unit    # fast unit tests only (-short)
 make lint         # golangci-lint
 ```
 
+## 5. Frontend
+
+Needs the backend (`make run`) and worker (`make worker`) running.
+
+```bash
+cd frontend
+pnpm install
+pnpm dev          # http://localhost:3000
+```
+
+The dev server proxies `/api/*` to the backend (`API_PROXY_TARGET`, default `http://localhost:8080`),
+so there's no CORS config. Register at http://localhost:3000, add tasks, then **Generate plan**.
+Build for production with `pnpm build` (Turbopack; type-checks + lints).
+
 ## Common tasks
 
 | Action | Command |
