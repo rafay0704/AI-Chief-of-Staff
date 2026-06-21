@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type PlanStatus string
@@ -143,14 +142,14 @@ func (ns NullTaskStatus) Value() (driver.Value, error) {
 }
 
 type DailyPlan struct {
-	ID        uuid.UUID   `json:"id"`
-	UserID    uuid.UUID   `json:"user_id"`
-	PlanDate  pgtype.Date `json:"plan_date"`
-	Status    PlanStatus  `json:"status"`
-	PlanJson  []byte      `json:"plan_json"`
-	Error     *string     `json:"error"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	PlanDate  time.Time  `json:"plan_date"`
+	Status    PlanStatus `json:"status"`
+	PlanJson  []byte     `json:"plan_json"`
+	Error     *string    `json:"error"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type Task struct {

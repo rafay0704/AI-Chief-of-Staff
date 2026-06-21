@@ -41,6 +41,10 @@ func Router(h *handler.Handler, tokens *auth.TokenManager, log *slog.Logger, pro
 		authed.GET("/tasks/:id", h.GetTask)
 		authed.PATCH("/tasks/:id", h.UpdateTask)
 		authed.DELETE("/tasks/:id", h.DeleteTask)
+
+		authed.POST("/plans/generate", h.GeneratePlan)
+		authed.GET("/plans/jobs/:id", h.GetPlanJob)
+		authed.GET("/plans", h.GetPlanByDate)
 	}
 
 	return r

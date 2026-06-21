@@ -79,16 +79,22 @@ Task object:
 
 ---
 
-## Planning  🔒  *(Batch 4 — placeholder)*
+## Planning  🔒
+
+The flow is async: `POST /plans/generate` enqueues a job (the API never blocks on Claude); a worker
+loads the user's pending tasks, calls the Planner agent, and persists the schedule. Poll the job, then
+fetch the plan. The plan id **is** the job id.
 
 ### `POST /plans/generate`
 ```json
-{ "date": "2026-06-22", "available_minutes": 480, "goals": ["ship batch 1"] }
+{ "date": "2026-06-22", "available_minutes": 480, "goals": ["ship batch 4"] }
 ```
-→ `202 { "job_id": "uuid", "status": "queued" }`
+`available_minutes` defaults to 480; `goals` optional. → `202 { "job_id": "uuid", "status": "queued", "date": "2026-06-22" }`
 
-### `GET /plans/jobs/:id`
-→ `200 { "job_id", "status": "queued|running|done|failed", "plan_id?" }`
+### `GET /plans/jobs/:id`  — poll job status
+→ `200 { "job_id", "status": "queued|running|done|failed", "date", "schedule?", "error?" }`
+(`schedule` present once `done`; `error` present if `failed`.)
 
-### `GET /plans/:date`
-→ `200` daily plan (see [AI_DESIGN.md](AI_DESIGN.md) for the schedule JSON contract).
+### `GET /plans?date=YYYY-MM-DD`  — fetch the plan for a date
+→ `200` plan object: `{ "id", "date", "status", "schedule", "created_at", "updated_at" }`.
+The `schedule` matches the Planner contract in [AI_DESIGN.md](AI_DESIGN.md). → `404` if no plan for that date.

@@ -24,6 +24,7 @@ const ContextUserIDKey = "userID"
 type Handler struct {
 	Auth  *service.AuthService
 	Tasks *service.TaskService
+	Plans *service.PlanService
 	DB    *pgxpool.Pool
 	Redis *redis.Client
 	Log   *slog.Logger

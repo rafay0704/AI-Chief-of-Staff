@@ -16,12 +16,14 @@ import (
 type fakeQuerier struct {
 	users map[uuid.UUID]repository.User
 	tasks map[uuid.UUID]repository.Task
+	plans map[uuid.UUID]repository.DailyPlan
 }
 
 func newFakeQuerier() *fakeQuerier {
 	return &fakeQuerier{
 		users: make(map[uuid.UUID]repository.User),
 		tasks: make(map[uuid.UUID]repository.Task),
+		plans: make(map[uuid.UUID]repository.DailyPlan),
 	}
 }
 
@@ -134,4 +136,71 @@ func (f *fakeQuerier) DeleteTask(_ context.Context, arg repository.DeleteTaskPar
 		return 1, nil
 	}
 	return 0, nil
+}
+
+func (f *fakeQuerier) UpsertPlanQueued(_ context.Context, arg repository.UpsertPlanQueuedParams) (repository.DailyPlan, error) {
+	for id, p := range f.plans {
+		if p.UserID == arg.UserID && p.PlanDate.Equal(arg.PlanDate) {
+			p.Status = repository.PlanStatusQueued
+			p.PlanJson = nil
+			p.Error = nil
+			p.UpdatedAt = time.Now()
+			f.plans[id] = p
+			return p, nil
+		}
+	}
+	now := time.Now()
+	p := repository.DailyPlan{
+		ID:        uuid.New(),
+		UserID:    arg.UserID,
+		PlanDate:  arg.PlanDate,
+		Status:    repository.PlanStatusQueued,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	f.plans[p.ID] = p
+	return p, nil
+}
+
+func (f *fakeQuerier) GetPlanByID(_ context.Context, arg repository.GetPlanByIDParams) (repository.DailyPlan, error) {
+	if p, ok := f.plans[arg.ID]; ok && p.UserID == arg.UserID {
+		return p, nil
+	}
+	return repository.DailyPlan{}, pgx.ErrNoRows
+}
+
+func (f *fakeQuerier) GetPlanByDate(_ context.Context, arg repository.GetPlanByDateParams) (repository.DailyPlan, error) {
+	for _, p := range f.plans {
+		if p.UserID == arg.UserID && p.PlanDate.Equal(arg.PlanDate) {
+			return p, nil
+		}
+	}
+	return repository.DailyPlan{}, pgx.ErrNoRows
+}
+
+func (f *fakeQuerier) SetPlanRunning(_ context.Context, id uuid.UUID) error {
+	if p, ok := f.plans[id]; ok {
+		p.Status = repository.PlanStatusRunning
+		f.plans[id] = p
+	}
+	return nil
+}
+
+func (f *fakeQuerier) SetPlanDone(_ context.Context, arg repository.SetPlanDoneParams) error {
+	if p, ok := f.plans[arg.ID]; ok {
+		p.Status = repository.PlanStatusDone
+		p.PlanJson = arg.PlanJson
+		p.Error = nil
+		f.plans[arg.ID] = p
+	}
+	return nil
+}
+
+func (f *fakeQuerier) SetPlanFailed(_ context.Context, arg repository.SetPlanFailedParams) error {
+	if p, ok := f.plans[arg.ID]; ok {
+		p.Status = repository.PlanStatusFailed
+		p.Error = arg.Error
+		f.plans[arg.ID] = p
+	}
+	return nil
 }

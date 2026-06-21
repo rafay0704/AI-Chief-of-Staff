@@ -14,11 +14,17 @@ type Querier interface {
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteTask(ctx context.Context, arg DeleteTaskParams) (int64, error)
+	GetPlanByDate(ctx context.Context, arg GetPlanByDateParams) (DailyPlan, error)
+	GetPlanByID(ctx context.Context, arg GetPlanByIDParams) (DailyPlan, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
+	SetPlanDone(ctx context.Context, arg SetPlanDoneParams) error
+	SetPlanFailed(ctx context.Context, arg SetPlanFailedParams) error
+	SetPlanRunning(ctx context.Context, id uuid.UUID) error
 	UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error)
+	UpsertPlanQueued(ctx context.Context, arg UpsertPlanQueuedParams) (DailyPlan, error)
 }
 
 var _ Querier = (*Queries)(nil)

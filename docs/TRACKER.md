@@ -9,15 +9,15 @@
 
 ## Current status
 
-- **Last updated:** 2026-06-21
-- **Active batch:** ✅ Batches 0–3 COMPLETE & verified
-- **Next step:** Batch 4 — end-to-end planning flow (POST /plans/generate → worker → Planner → persist)
+- **Last updated:** 2026-06-22
+- **Active batch:** ✅ Batches 0–4 COMPLETE & verified — **MVP backend done**
+- **Next step:** Batch 5 — Next.js frontend dashboard
 
-> Batch 2 verified: queue + pool unit tests (miniredis) green; live run showed 4 workers processing
-> concurrently, retry→dead-letter, graceful shutdown.
-> Batch 3 verified 2026-06-21: AI unit tests (fake Completer) green; **live Claude call (Haiku 4.5)
-> produced a valid 5-block schedule in ~2s**. Default model **claude-haiku-4-5-20251001** (credit-efficient).
-> Note: Postgres host port is **5433** (5432 was already taken by a local Postgres).
+> Batch 3 verified: AI unit tests (fake Completer) green; live Claude call (Haiku 4.5) → valid schedule.
+> Batch 4 verified 2026-06-22: full chain live — POST /plans/generate → Redis queue → worker pool →
+> Claude Planner → Postgres → fetch. Job went queued→running→done in ~4s; schedule respected
+> priorities, durations, rest blocks, and the 300-min budget.
+> Default model **claude-haiku-4-5-20251001**. Postgres host port **5433** (5432 taken locally).
 
 ---
 
@@ -56,11 +56,12 @@
 - [x] Mocked unit tests (fake Completer) + key-gated live smoke test (`live_test.go`)
 - [x] **Verified:** live Claude call returned a valid schedule; agents testable without a key
 
-### ⬜ Batch 4 — End-to-End Planning Flow
-- [ ] `POST /plans/generate` enqueues job (202 + job_id)
-- [ ] Worker: tasks → Planner → persist `daily_plans` → status
-- [ ] `GET /plans/:date`, `GET /plans/jobs/:id`
-- [ ] **Verify:** create → generate → poll → fetch plan
+### ✅ Batch 4 — End-to-End Planning Flow
+- [x] `POST /plans/generate` enqueues job (202 + job_id); plan id == job id (`daily_plans` upsert)
+- [x] Worker plan handler: pending tasks → Planner agent → persist `daily_plans` → status transitions
+- [x] `GET /plans/jobs/:id` (poll) + `GET /plans?date=YYYY-MM-DD` (fetch)
+- [x] PlanService unit tests (fake enqueuer + querier): enqueue, idempotent re-gen, lifecycle, not-found
+- [x] **Verified:** create → generate → poll (queued→running→done) → fetch full schedule, live
 
 ### ⬜ Batch 5 — Next.js Frontend
 - [ ] Next.js latest + TS + Tailwind v4 + shadcn/ui scaffold

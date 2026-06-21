@@ -17,6 +17,7 @@ import (
 	"github.com/rafay0704/ai-chief-of-staff/backend/internal/platform/db"
 	"github.com/rafay0704/ai-chief-of-staff/backend/internal/platform/logger"
 	redisplatform "github.com/rafay0704/ai-chief-of-staff/backend/internal/platform/redis"
+	"github.com/rafay0704/ai-chief-of-staff/backend/internal/queue"
 	"github.com/rafay0704/ai-chief-of-staff/backend/internal/repository"
 	"github.com/rafay0704/ai-chief-of-staff/backend/internal/service"
 )
@@ -49,10 +50,12 @@ func main() {
 
 	repo := repository.New(pool)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL)
+	jobQueue := queue.New(rdb, "acos")
 
 	h := &handler.Handler{
 		Auth:  service.NewAuthService(repo, tokens),
 		Tasks: service.NewTaskService(repo),
+		Plans: service.NewPlanService(repo, jobQueue),
 		DB:    pool,
 		Redis: rdb,
 		Log:   log,
