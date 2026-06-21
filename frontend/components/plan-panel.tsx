@@ -26,9 +26,8 @@ export function PlanPanel({ token }: { token: string }) {
   const [date, setDate] = useState(todayISO());
   const [minutes, setMinutes] = useState(480);
   const [goals, setGoals] = useState("");
-  const [activeJob, setActiveJob] = useState<string | null>(null);
 
-  // Existing plan for the selected date (404 → none).
+  // Stored plan for the selected date (404 → none). The single source of truth.
   const planQuery = useQuery({
     queryKey: ["plan", date],
     queryFn: async () => {
@@ -41,33 +40,30 @@ export function PlanPanel({ token }: { token: string }) {
     },
   });
 
-  // Live polling of an in-flight generation job.
+  const stored = planQuery.data ?? undefined;
+  const planId = stored?.id;
+  const inProgress = stored?.status === "queued" || stored?.status === "running";
+
+  // Poll the job only while the stored plan is in progress (declarative — derived
+  // from status, not from an effect-managed flag).
   const jobQuery = useQuery({
-    queryKey: ["plan-job", activeJob],
-    queryFn: () => api.getPlanJob(token, activeJob as string),
-    enabled: !!activeJob,
+    queryKey: ["plan-job", planId],
+    queryFn: () => api.getPlanJob(token, planId as string),
+    enabled: !!planId && inProgress,
     refetchInterval: (q) => {
       const s = q.state.data?.status;
       return s === "queued" || s === "running" ? 1500 : false;
     },
   });
 
-  // Resume polling if the stored plan is still in progress (e.g. after reload).
-  useEffect(() => {
-    const s = planQuery.data?.status;
-    if (!activeJob && planQuery.data && (s === "queued" || s === "running")) {
-      setActiveJob(planQuery.data.id);
-    }
-  }, [planQuery.data, activeJob]);
-
-  // When the job reaches a terminal state, refresh the stored plan and stop polling.
+  // When the poll reaches a terminal state, refresh the stored plan. This effect
+  // performs a side effect (cache invalidation) only — it sets no React state.
   useEffect(() => {
     const s = jobQuery.data?.status;
-    if (activeJob && (s === "done" || s === "failed")) {
+    if (s === "done" || s === "failed") {
       qc.invalidateQueries({ queryKey: ["plan", date] });
-      setActiveJob(null);
     }
-  }, [jobQuery.data, activeJob, date, qc]);
+  }, [jobQuery.data?.status, date, qc]);
 
   const generate = useMutation({
     mutationFn: () =>
@@ -79,12 +75,12 @@ export function PlanPanel({ token }: { token: string }) {
           .map((g) => g.trim())
           .filter(Boolean),
       }),
-    onSuccess: (job) => setActiveJob(job.job_id),
+    // Refetch the stored plan so it flips to "queued" and polling kicks in.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["plan", date] }),
   });
 
-  // Derive the view from the live job (if active) else the stored plan.
-  const live = activeJob ? jobQuery.data : undefined;
-  const stored = planQuery.data ?? undefined;
+  // Prefer the live poll while in progress; otherwise the stored plan.
+  const live = inProgress ? jobQuery.data : undefined;
   const status = live?.status ?? stored?.status ?? null;
   const schedule: Schedule | undefined = live?.schedule ?? stored?.schedule;
   const error = live?.error ?? stored?.error;

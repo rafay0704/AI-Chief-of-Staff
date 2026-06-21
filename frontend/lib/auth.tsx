@@ -1,62 +1,78 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { useSyncExternalStore } from "react";
 import type { User } from "./schemas";
+
+// Auth session is kept in localStorage and exposed via useSyncExternalStore —
+// the SSR-safe, effect-free way to read external mutable state in React. No
+// AuthProvider is needed; the store is module-level.
 
 const STORAGE_KEY = "acos.auth";
 
-interface Session {
+export interface Session {
   token: string;
   user: User;
 }
 
-interface AuthContextValue {
-  user: User | null;
-  token: string | null;
-  ready: boolean; // true once localStorage has been read
-  signIn: (session: Session) => void;
-  signOut: () => void;
-}
+// getSnapshot must return a stable reference between renders, so we cache the
+// parsed value keyed on the raw string.
+let cachedRaw: string | null = null;
+let cachedSession: Session | null = null;
 
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [ready, setReady] = useState(false);
-
-  // Hydrate from localStorage on mount (client only).
-  useEffect(() => {
+function read(): Session | null {
+  const raw = typeof window === "undefined" ? null : window.localStorage.getItem(STORAGE_KEY);
+  if (raw !== cachedRaw) {
+    cachedRaw = raw;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setSession(JSON.parse(raw) as Session);
+      cachedSession = raw ? (JSON.parse(raw) as Session) : null;
     } catch {
-      /* corrupt storage — ignore */
+      cachedSession = null;
     }
-    setReady(true);
-  }, []);
-
-  const signIn = useCallback((next: Session) => {
-    setSession(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  }, []);
-
-  const signOut = useCallback(() => {
-    setSession(null);
-    localStorage.removeItem(STORAGE_KEY);
-  }, []);
-
-  return (
-    <AuthContext.Provider
-      value={{ user: session?.user ?? null, token: session?.token ?? null, ready, signIn, signOut }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  }
+  return cachedSession;
 }
 
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+const listeners = new Set<() => void>();
+const emit = () => listeners.forEach((l) => l());
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === STORAGE_KEY) cb(); // sync across tabs
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners.delete(cb);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+export function signIn(session: Session): void {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  emit();
+}
+
+export function signOut(): void {
+  window.localStorage.removeItem(STORAGE_KEY);
+  emit();
+}
+
+// useHydrated returns false during SSR and the hydration render, true after —
+// without any effect — so callers can avoid redirecting before hydration.
+const noopSubscribe = () => () => {};
+
+export function useAuth() {
+  const session = useSyncExternalStore(subscribe, read, () => null);
+  const ready = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+  return {
+    user: session?.user ?? null,
+    token: session?.token ?? null,
+    ready,
+    signIn,
+    signOut,
+  };
 }
