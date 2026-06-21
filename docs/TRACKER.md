@@ -10,12 +10,13 @@
 ## Current status
 
 - **Last updated:** 2026-06-21
-- **Active batch:** ✅ Batches 0–2 COMPLETE & verified
-- **Next step:** Batch 3 — AI layer (Claude). API key is set; default model **claude-haiku-4-5** (credit-efficient).
+- **Active batch:** ✅ Batches 0–3 COMPLETE & verified
+- **Next step:** Batch 4 — end-to-end planning flow (POST /plans/generate → worker → Planner → persist)
 
-> First delivery (0+1) verified 2026-06-21: vet/gofmt clean, tests green, full curl run.
-> Batch 2 verified 2026-06-21: queue + pool unit tests (miniredis) green; live run showed 4 workers
-> processing concurrently, retry→dead-letter on failures, and graceful shutdown.
+> Batch 2 verified: queue + pool unit tests (miniredis) green; live run showed 4 workers processing
+> concurrently, retry→dead-letter, graceful shutdown.
+> Batch 3 verified 2026-06-21: AI unit tests (fake Completer) green; **live Claude call (Haiku 4.5)
+> produced a valid 5-block schedule in ~2s**. Default model **claude-haiku-4-5-20251001** (credit-efficient).
 > Note: Postgres host port is **5433** (5432 was already taken by a local Postgres).
 
 ---
@@ -48,12 +49,12 @@
 - [x] Unit tests with miniredis (queue + pool incl. retry/dead-letter/unknown-type)
 - [x] **Verified:** 4 workers processing concurrently, retry→dead-letter, clean SIGINT shutdown
 
-### ⬜ Batch 3 — AI Layer (Claude)
-- [ ] Claude client wrapper (context, timeouts, retry)
-- [ ] Planner / Priority / Breakdown agents with strict JSON + schema validation
-- [ ] Prompt templates documented in AI_DESIGN.md
-- [ ] Mocked unit tests + key-gated live smoke test
-- [ ] **Verify (needs key):** sample tasks → valid JSON schedule
+### ✅ Batch 3 — AI Layer (Claude)
+- [x] Claude client wrapper (`Completer` interface, context timeouts, SDK auto-retry) — `internal/ai/client.go`
+- [x] Planner / Priority / Breakdown agents with strict JSON + schema validation + 1 repair round-trip
+- [x] Versioned prompt templates (`planner-v1`, `priority-v1`, `breakdown-v1`) — `internal/ai/prompts.go`
+- [x] Mocked unit tests (fake Completer) + key-gated live smoke test (`live_test.go`)
+- [x] **Verified:** live Claude call returned a valid schedule; agents testable without a key
 
 ### ⬜ Batch 4 — End-to-End Planning Flow
 - [ ] `POST /plans/generate` enqueues job (202 + job_id)

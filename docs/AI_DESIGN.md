@@ -16,7 +16,15 @@
 
 ## Model
 
-Default `ANTHROPIC_MODEL=claude-opus-4-8` (configurable). Use the official `anthropic-sdk-go`.
+Default `ANTHROPIC_MODEL=claude-haiku-4-5-20251001` (configurable) — credit-efficient and plenty
+capable for structured JSON planning; bump to `claude-sonnet-4-6` for higher-quality plans. Uses the
+official `anthropic-sdk-go`. Requests are plain (Haiku does not take `effort`/`thinking`); the SDK
+auto-retries 429/5xx, and we add a per-request timeout.
+
+**Implemented (Batch 3):** agents depend on a `Completer` interface (`internal/ai/client.go`) so they
+can be unit-tested with a fake; the real `Client` calls Claude. Each agent enforces strict JSON via the
+system prompt, parses defensively (`extractJSON` strips markdown fences), validates against the Go
+schema, and makes exactly **one repair round-trip** on failure before erroring.
 
 ## Agents
 
