@@ -1,0 +1,25 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Go
+/backend/bin/
+/backend/tmp/
+*.test
+*.out
+coverage.*
+
+# Node / Next.js
+node_modules/
+/frontend/.next/
+/frontend/out/
+/frontend/.turbo/
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

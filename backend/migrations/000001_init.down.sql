@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS daily_plans;
+DROP TYPE IF EXISTS plan_status;
+
+DROP TABLE IF EXISTS tasks;
+DROP TYPE IF EXISTS task_status;
+DROP TYPE IF EXISTS task_priority;
+
+DROP TABLE IF EXISTS users;
