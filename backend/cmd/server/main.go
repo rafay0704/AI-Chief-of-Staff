@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rafay0704/ai-chief-of-staff/backend/internal/ai"
 	"github.com/rafay0704/ai-chief-of-staff/backend/internal/auth"
 	"github.com/rafay0704/ai-chief-of-staff/backend/internal/config"
 	apihttp "github.com/rafay0704/ai-chief-of-staff/backend/internal/http"
@@ -51,11 +52,28 @@ func main() {
 	repo := repository.New(pool)
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTTTL)
 	jobQueue := queue.New(rdb, "acos")
+	taskSvc := service.NewTaskService(repo)
+
+	// Interactive AI agents power the synchronous /ai/* endpoints. Nil when no
+	// key is configured — those endpoints then return 503.
+	var agents *ai.Agents
+	if cfg.AnthropicAPIKey != "" {
+		client, err := ai.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicModel)
+		if err != nil {
+			log.Error("init claude client", "err", err)
+			os.Exit(1)
+		}
+		agents = ai.NewAgents(client)
+		log.Info("interactive AI endpoints enabled", "model", cfg.AnthropicModel)
+	} else {
+		log.Warn("ANTHROPIC_API_KEY not set; /ai/* endpoints will return 503")
+	}
 
 	h := &handler.Handler{
 		Auth:  service.NewAuthService(repo, tokens),
-		Tasks: service.NewTaskService(repo),
+		Tasks: taskSvc,
 		Plans: service.NewPlanService(repo, jobQueue),
+		AI:    service.NewAIService(taskSvc, agents),
 		DB:    pool,
 		Redis: rdb,
 		Log:   log,

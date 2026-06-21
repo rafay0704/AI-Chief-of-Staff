@@ -49,6 +49,16 @@ processing list keeps it durable until explicitly acked, giving at-least-once de
 recovery. Trade-off: handlers must be **idempotent** (a job may run more than once); retry/backoff and
 dead-lettering are implemented by us rather than a library, which is the point (concurrency showcase).
 
+### ADR-011 — Interactive AI endpoints are synchronous; only daily planning is queued
+**Decision:** `POST /ai/prioritize` and `POST /ai/breakdown/:id` call Claude synchronously and return
+the result in the response. Daily plan generation stays async (queue + worker + `daily_plans`).
+**Why:** Priority ranking and task breakdown are single, fast (~1–2s) calls whose results are ephemeral
+(shown in the UI, not persisted) — a queue + polling + results table would be pure overhead and worse
+UX. Daily planning is heavier and benefits from durability, retry, and not blocking the request, so it
+stays queued. The "API never blocks on AI" rule targets coupling cheap CRUD to expensive work, not
+forbidding a dedicated, user-initiated AI endpoint from awaiting its own result. The server builds the
+AI agents the same way the worker does; when no key is set these endpoints return `503` (`unavailable`).
+
 ### ADR-010 — Frontend: Next.js `/api` rewrite proxy; hand-built UI over shadcn
 **Decision:** The Next.js app proxies `/api/*` → the Go backend via a `next.config.ts` rewrite, so the
 browser is always same-origin (no CORS, no backend change). UI is a small set of hand-built Tailwind v4

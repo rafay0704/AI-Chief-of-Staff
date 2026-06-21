@@ -45,6 +45,10 @@ func Router(h *handler.Handler, tokens *auth.TokenManager, log *slog.Logger, pro
 		authed.POST("/plans/generate", h.GeneratePlan)
 		authed.GET("/plans/jobs/:id", h.GetPlanJob)
 		authed.GET("/plans", h.GetPlanByDate)
+
+		// Interactive (synchronous) AI endpoints.
+		authed.POST("/ai/prioritize", h.Prioritize)
+		authed.POST("/ai/breakdown/:id", h.BreakdownTask)
 	}
 
 	return r

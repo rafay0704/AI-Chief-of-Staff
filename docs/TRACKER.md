@@ -10,8 +10,13 @@
 ## Current status
 
 - **Last updated:** 2026-06-22
-- **Active batch:** ✅ Batches 0–5 COMPLETE & verified — **full-stack MVP done**
-- **Next step:** Batch 6 (V2, optional) — priority view, replanning, weekly reports, etc.
+- **Active batch:** ✅ Batches 0–5 + Batch 6 (Priority + Breakdown) COMPLETE & verified
+- **Next step:** remaining optional V2 ideas — replanning, weekly reports, stress mode, habits, memory
+
+> Batch 6 (Priority + Breakdown) verified 2026-06-22: wired the two already-built Claude agents to
+> synchronous `/ai/prioritize` and `/ai/breakdown/:id` endpoints + dashboard UI (Prioritize button with
+> rank/urgent badges + drop suggestions; per-task Break-down expander). 37 backend tests pass; live
+> Claude calls returned a sensible ranking and a 5-step breakdown. AI endpoints return 503 if no key.
 
 > Batch 4 verified: full chain live — generate → queue → worker → Claude Planner → Postgres → fetch.
 > Batch 5 verified 2026-06-22: Next.js dashboard builds clean (5 routes); ran the full flow **through
@@ -71,8 +76,10 @@
 - [x] Custom dark "command desk" theme (warm ink + amber accent), hand-built UI primitives
 - [x] **Verified:** `pnpm build` clean (5 routes); full flow driven through the `/api` proxy
 
-### ⬜ Batch 6 — V2 (optional)
-- [ ] Priority view · adaptive replanning · weekly reports · stress mode · habits · memory
+### 🔄 Batch 6 — V2 (optional)
+- [x] **Priority engine** — `POST /ai/prioritize` ranks pending tasks (rank/urgent/reason + drop suggestions); UI: Prioritize button, rank badges, drop list
+- [x] **Task breakdown** — `POST /ai/breakdown/:id` splits a task into ordered steps; UI: per-task expander
+- [ ] adaptive replanning · weekly reports · stress mode · habit tracking · preference memory
 
 ---
 

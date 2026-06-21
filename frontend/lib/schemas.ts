@@ -73,3 +73,33 @@ export const planSchema = z.object({
   updated_at: z.string(),
 });
 export type Plan = z.infer<typeof planSchema>;
+
+// POST /ai/prioritize response.
+export const priorityResultSchema = z.object({
+  ranked: z.array(
+    z.object({
+      task_id: z.string(),
+      rank: z.number(),
+      reason: z.string(),
+      urgent: z.boolean(),
+    }),
+  ),
+  drop_suggestions: z
+    .array(z.object({ task_id: z.string(), reason: z.string() }))
+    .nullish()
+    .transform((v) => v ?? []),
+});
+export type PriorityResult = z.infer<typeof priorityResultSchema>;
+
+// POST /ai/breakdown/:id response.
+export const breakdownSchema = z.object({
+  task_id: z.string(),
+  steps: z.array(
+    z.object({
+      order: z.number(),
+      title: z.string(),
+      duration_minutes: z.number(),
+    }),
+  ),
+});
+export type Breakdown = z.infer<typeof breakdownSchema>;

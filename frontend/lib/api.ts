@@ -1,8 +1,10 @@
 import { z } from "zod";
 import {
   authResponseSchema,
+  breakdownSchema,
   planJobSchema,
   planSchema,
+  priorityResultSchema,
   taskSchema,
   tasksResponseSchema,
   type Priority,
@@ -111,4 +113,12 @@ export const api = {
 
   getPlanByDate: (token: string, date: string) =>
     request(`/plans?date=${encodeURIComponent(date)}`, { token, schema: planSchema }),
+
+  // ── Interactive AI ───────────────────────────────────────────────────────────
+
+  prioritize: (token: string) =>
+    request("/ai/prioritize", { method: "POST", token, schema: priorityResultSchema }),
+
+  breakdown: (token: string, taskId: string) =>
+    request(`/ai/breakdown/${taskId}`, { method: "POST", token, schema: breakdownSchema }),
 };

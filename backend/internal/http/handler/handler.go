@@ -25,6 +25,7 @@ type Handler struct {
 	Auth  *service.AuthService
 	Tasks *service.TaskService
 	Plans *service.PlanService
+	AI    *service.AIService
 	DB    *pgxpool.Pool
 	Redis *redis.Client
 	Log   *slog.Logger
@@ -55,6 +56,8 @@ func (h *Handler) respondError(c *gin.Context, err error) {
 		writeError(c, http.StatusForbidden, "forbidden", err.Error(), nil)
 	case errors.Is(err, domain.ErrValidation):
 		writeError(c, http.StatusBadRequest, "validation_error", err.Error(), nil)
+	case errors.Is(err, domain.ErrUnavailable):
+		writeError(c, http.StatusServiceUnavailable, "unavailable", err.Error(), nil)
 	default:
 		logger.FromContext(c.Request.Context(), h.Log).Error("unhandled error", "err", err)
 		writeError(c, http.StatusInternalServerError, "internal", "internal server error", nil)

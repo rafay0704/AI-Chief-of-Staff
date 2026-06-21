@@ -98,3 +98,27 @@ fetch the plan. The plan id **is** the job id.
 ### `GET /plans?date=YYYY-MM-DD`  — fetch the plan for a date
 → `200` plan object: `{ "id", "date", "status", "schedule", "created_at", "updated_at" }`.
 The `schedule` matches the Planner contract in [AI_DESIGN.md](AI_DESIGN.md). → `404` if no plan for that date.
+
+---
+
+## Interactive AI  🔒
+
+Synchronous Claude calls (return directly, ~1–2s) — unlike the queued daily plan. Return `503`
+(`unavailable`) if no `ANTHROPIC_API_KEY` is configured.
+
+### `POST /ai/prioritize`  — rank the user's pending tasks
+→ `200`
+```json
+{
+  "ranked": [ { "task_id": "uuid", "rank": 1, "reason": "blocks the release", "urgent": true } ],
+  "drop_suggestions": [ { "task_id": "uuid", "reason": "low value, no deadline" } ]
+}
+```
+→ `400` if there are no pending tasks to rank.
+
+### `POST /ai/breakdown/:id`  — split a task into ordered steps
+→ `200`
+```json
+{ "task_id": "uuid", "steps": [ { "order": 1, "title": "Read pgx docs", "duration_minutes": 30 } ] }
+```
+→ `404` if the task doesn't exist / isn't yours.
