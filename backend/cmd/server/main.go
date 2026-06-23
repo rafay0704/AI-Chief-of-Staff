@@ -69,14 +69,17 @@ func main() {
 		log.Warn("ANTHROPIC_API_KEY not set; /ai/* endpoints will return 503")
 	}
 
+	statsSvc := service.NewStatsService(repo)
 	h := &handler.Handler{
-		Auth:  service.NewAuthService(repo, tokens),
-		Tasks: taskSvc,
-		Plans: service.NewPlanService(repo, jobQueue),
-		AI:    service.NewAIService(taskSvc, agents),
-		DB:    pool,
-		Redis: rdb,
-		Log:   log,
+		Auth:   service.NewAuthService(repo, tokens),
+		Tasks:  taskSvc,
+		Plans:  service.NewPlanService(repo, jobQueue),
+		AI:     service.NewAIService(taskSvc, statsSvc, agents),
+		Stats:  statsSvc,
+		Habits: service.NewHabitService(repo),
+		DB:     pool,
+		Redis:  rdb,
+		Log:    log,
 	}
 
 	srv := &http.Server{

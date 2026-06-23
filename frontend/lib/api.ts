@@ -2,11 +2,16 @@ import { z } from "zod";
 import {
   authResponseSchema,
   breakdownSchema,
+  habitSchema,
+  habitsResponseSchema,
   planJobSchema,
   planSchema,
   priorityResultSchema,
+  statsSchema,
   taskSchema,
   tasksResponseSchema,
+  weeklyReportSchema,
+  type PlanMode,
   type Priority,
   type TaskStatus,
 } from "./schemas";
@@ -105,7 +110,7 @@ export const api = {
 
   generatePlan: (
     token: string,
-    input: { date: string; available_minutes?: number; goals?: string[] },
+    input: { date: string; available_minutes?: number; goals?: string[]; mode?: PlanMode },
   ) => request("/plans/generate", { method: "POST", body: input, token, schema: planJobSchema }),
 
   getPlanJob: (token: string, jobId: string) =>
@@ -121,4 +126,31 @@ export const api = {
 
   breakdown: (token: string, taskId: string) =>
     request(`/ai/breakdown/${taskId}`, { method: "POST", token, schema: breakdownSchema }),
+
+  weeklyReport: (token: string) =>
+    request("/ai/weekly-report", { method: "POST", token, schema: weeklyReportSchema }),
+
+  // ── Analytics ────────────────────────────────────────────────────────────────
+
+  stats: (token: string) => request("/stats", { token, schema: statsSchema }),
+
+  // ── Habits ───────────────────────────────────────────────────────────────────
+
+  listHabits: (token: string) =>
+    request("/habits", { token, schema: habitsResponseSchema }).then((r) => r.habits),
+
+  createHabit: (token: string, name: string) =>
+    request("/habits", { method: "POST", body: { name }, token, schema: habitSchema }),
+
+  deleteHabit: (token: string, id: string) =>
+    request<void>(`/habits/${id}`, { method: "DELETE", token }),
+
+  checkHabit: (token: string, id: string, date: string) =>
+    request<void>(`/habits/${id}/checkin`, { method: "POST", body: { date }, token }),
+
+  uncheckHabit: (token: string, id: string, date: string) =>
+    request<void>(`/habits/${id}/checkin?date=${encodeURIComponent(date)}`, {
+      method: "DELETE",
+      token,
+    }),
 };

@@ -16,6 +16,7 @@ type generatePlanRequest struct {
 	Date             string   `json:"date" binding:"required"`
 	AvailableMinutes int      `json:"available_minutes" binding:"omitempty,gt=0"`
 	Goals            []string `json:"goals" binding:"omitempty,dive,max=200"`
+	Mode             string   `json:"mode" binding:"omitempty,oneof=balanced deep_focus stress_relief light"`
 }
 
 // GeneratePlan handles POST /plans/generate — enqueues a planning job.
@@ -40,7 +41,7 @@ func (h *Handler) GeneratePlan(c *gin.Context) {
 		minutes = defaultAvailableMinutes
 	}
 
-	plan, err := h.Plans.Generate(c.Request.Context(), uid, req.Date, minutes, req.Goals)
+	plan, err := h.Plans.Generate(c.Request.Context(), uid, req.Date, minutes, req.Goals, req.Mode)
 	if err != nil {
 		h.respondError(c, err)
 		return

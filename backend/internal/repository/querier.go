@@ -11,18 +11,28 @@ import (
 )
 
 type Querier interface {
+	CheckInHabit(ctx context.Context, arg CheckInHabitParams) error
+	CompletionTrend(ctx context.Context, arg CompletionTrendParams) ([]CompletionTrendRow, error)
+	CreateHabit(ctx context.Context, arg CreateHabitParams) (Habit, error)
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteHabit(ctx context.Context, arg DeleteHabitParams) (int64, error)
 	DeleteTask(ctx context.Context, arg DeleteTaskParams) (int64, error)
+	GetHabit(ctx context.Context, arg GetHabitParams) (Habit, error)
 	GetPlanByDate(ctx context.Context, arg GetPlanByDateParams) (DailyPlan, error)
 	GetPlanByID(ctx context.Context, arg GetPlanByIDParams) (DailyPlan, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	ListCheckinsSince(ctx context.Context, arg ListCheckinsSinceParams) ([]ListCheckinsSinceRow, error)
+	ListHabits(ctx context.Context, userID uuid.UUID) ([]Habit, error)
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
+	PlanCount(ctx context.Context, userID uuid.UUID) (int32, error)
 	SetPlanDone(ctx context.Context, arg SetPlanDoneParams) error
 	SetPlanFailed(ctx context.Context, arg SetPlanFailedParams) error
 	SetPlanRunning(ctx context.Context, id uuid.UUID) error
+	TaskStats(ctx context.Context, userID uuid.UUID) (TaskStatsRow, error)
+	UncheckHabit(ctx context.Context, arg UncheckHabitParams) error
 	UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error)
 	UpsertPlanQueued(ctx context.Context, arg UpsertPlanQueuedParams) (DailyPlan, error)
 }

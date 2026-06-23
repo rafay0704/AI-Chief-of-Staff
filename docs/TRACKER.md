@@ -9,14 +9,16 @@
 
 ## Current status
 
-- **Last updated:** 2026-06-22
-- **Active batch:** ✅ Batches 0–5 + Batch 6 (Priority + Breakdown) COMPLETE & verified
-- **Next step:** remaining optional V2 ideas — replanning, weekly reports, stress mode, habits, memory
+- **Last updated:** 2026-06-24
+- **Active batch:** ✅ Batches 0–7 COMPLETE & verified — full MVP + 6 V2 features
+- **Next step:** (optional) adaptive replanning, preference memory; or deploy/CI hardening
 
-> Batch 6 (Priority + Breakdown) verified 2026-06-22: wired the two already-built Claude agents to
-> synchronous `/ai/prioritize` and `/ai/breakdown/:id` endpoints + dashboard UI (Prioritize button with
-> rank/urgent badges + drop suggestions; per-task Break-down expander). 37 backend tests pass; live
-> Claude calls returned a sensible ranking and a 5-step breakdown. AI endpoints return 503 if no key.
+> Batch 7 (showcase features) verified 2026-06-24 — all live against `rafay@gmail.com`:
+> **Analytics** (`GET /stats`: completion rate, focus minutes, priority mix, 7-day trend),
+> **Focus modes** (balanced/deep_focus/stress_relief/light on the planner),
+> **Weekly AI report** (4th Claude agent — narrative wins/watch-outs/suggestions),
+> **Habit tracking** (habits + check-ins tables, streaks 5/3/4, contribution grid UI).
+> **45 backend tests pass**; frontend build + lint clean. App runs: backend :8080, web :3000.
 
 > Batch 4 verified: full chain live — generate → queue → worker → Claude Planner → Postgres → fetch.
 > Batch 5 verified 2026-06-22: Next.js dashboard builds clean (5 routes); ran the full flow **through
@@ -76,10 +78,16 @@
 - [x] Custom dark "command desk" theme (warm ink + amber accent), hand-built UI primitives
 - [x] **Verified:** `pnpm build` clean (5 routes); full flow driven through the `/api` proxy
 
-### 🔄 Batch 6 — V2 (optional)
+### ✅ Batch 6 — AI task tools
 - [x] **Priority engine** — `POST /ai/prioritize` ranks pending tasks (rank/urgent/reason + drop suggestions); UI: Prioritize button, rank badges, drop list
 - [x] **Task breakdown** — `POST /ai/breakdown/:id` splits a task into ordered steps; UI: per-task expander
-- [ ] adaptive replanning · weekly reports · stress mode · habit tracking · preference memory
+
+### ✅ Batch 7 — Showcase features
+- [x] **Productivity Analytics** — `GET /stats` (SQL aggregation: completion rate, focus minutes, priority mix, 7-day trend); Insights panel with completion ring, stat tiles, trend bars, priority mix
+- [x] **Focus / Stress modes** — `mode` on plan generate (balanced/deep_focus/stress_relief/light) reshapes the planner prompt; mode selector in the plan panel
+- [x] **Weekly AI Report** — Reporter agent (`reporter-v1`) + `POST /ai/weekly-report`; narrative headline/summary/wins/watch-outs/suggestions in the Insights panel
+- [x] **Habit tracking** — `habits` + `habit_checkins` tables; `GET/POST/DELETE /habits`, check-in toggle; streak computation; 4-week contribution-grid UI
+- [ ] (still open) adaptive auto-replanning · preference memory
 
 ---
 

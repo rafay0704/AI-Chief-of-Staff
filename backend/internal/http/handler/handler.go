@@ -22,13 +22,15 @@ const ContextUserIDKey = "userID"
 
 // Handler bundles services and infra needed by the HTTP handlers.
 type Handler struct {
-	Auth  *service.AuthService
-	Tasks *service.TaskService
-	Plans *service.PlanService
-	AI    *service.AIService
-	DB    *pgxpool.Pool
-	Redis *redis.Client
-	Log   *slog.Logger
+	Auth   *service.AuthService
+	Tasks  *service.TaskService
+	Plans  *service.PlanService
+	AI     *service.AIService
+	Stats  *service.StatsService
+	Habits *service.HabitService
+	DB     *pgxpool.Pool
+	Redis  *redis.Client
+	Log    *slog.Logger
 }
 
 // errorBody is the single error envelope used by every non-2xx response.

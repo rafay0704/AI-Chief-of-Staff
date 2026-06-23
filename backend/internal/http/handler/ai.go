@@ -36,3 +36,18 @@ func (h *Handler) BreakdownTask(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+// WeeklyReport handles POST /ai/weekly-report — a narrative productivity review.
+func (h *Handler) WeeklyReport(c *gin.Context) {
+	uid, ok := userID(c)
+	if !ok {
+		h.respondError(c, domain.ErrUnauthorized)
+		return
+	}
+	result, err := h.AI.WeeklyReport(c.Request.Context(), uid)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

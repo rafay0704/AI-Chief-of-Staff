@@ -14,16 +14,20 @@ import (
 // fakeQuerier is an in-memory implementation of repository.Querier for unit
 // tests, so the service layer can be exercised without a real database.
 type fakeQuerier struct {
-	users map[uuid.UUID]repository.User
-	tasks map[uuid.UUID]repository.Task
-	plans map[uuid.UUID]repository.DailyPlan
+	users    map[uuid.UUID]repository.User
+	tasks    map[uuid.UUID]repository.Task
+	plans    map[uuid.UUID]repository.DailyPlan
+	habits   map[uuid.UUID]repository.Habit
+	checkins map[uuid.UUID]map[string]bool // habitID -> day -> true
 }
 
 func newFakeQuerier() *fakeQuerier {
 	return &fakeQuerier{
-		users: make(map[uuid.UUID]repository.User),
-		tasks: make(map[uuid.UUID]repository.Task),
-		plans: make(map[uuid.UUID]repository.DailyPlan),
+		users:    make(map[uuid.UUID]repository.User),
+		tasks:    make(map[uuid.UUID]repository.Task),
+		plans:    make(map[uuid.UUID]repository.DailyPlan),
+		habits:   make(map[uuid.UUID]repository.Habit),
+		checkins: make(map[uuid.UUID]map[string]bool),
 	}
 }
 
@@ -203,4 +207,122 @@ func (f *fakeQuerier) SetPlanFailed(_ context.Context, arg repository.SetPlanFai
 		f.plans[arg.ID] = p
 	}
 	return nil
+}
+
+func (f *fakeQuerier) TaskStats(_ context.Context, userID uuid.UUID) (repository.TaskStatsRow, error) {
+	var r repository.TaskStatsRow
+	for _, t := range f.tasks {
+		if t.UserID != userID {
+			continue
+		}
+		r.Total++
+		switch t.Status {
+		case repository.TaskStatusCompleted:
+			r.Completed++
+			r.CompletedMinutes += t.DurationMinutes
+		case repository.TaskStatusPending:
+			r.Pending++
+			r.PendingMinutes += t.DurationMinutes
+		}
+		switch t.Priority {
+		case repository.TaskPriorityHigh:
+			r.High++
+		case repository.TaskPriorityMedium:
+			r.Medium++
+		case repository.TaskPriorityLow:
+			r.Low++
+		}
+	}
+	return r, nil
+}
+
+func (f *fakeQuerier) PlanCount(_ context.Context, userID uuid.UUID) (int32, error) {
+	var n int32
+	for _, p := range f.plans {
+		if p.UserID == userID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeQuerier) CompletionTrend(_ context.Context, arg repository.CompletionTrendParams) ([]repository.CompletionTrendRow, error) {
+	byDay := map[string]int32{}
+	for _, t := range f.tasks {
+		if t.UserID == arg.UserID && t.Status == repository.TaskStatusCompleted && !t.UpdatedAt.Before(arg.UpdatedAt) {
+			byDay[t.UpdatedAt.UTC().Format("2006-01-02")]++
+		}
+	}
+	out := []repository.CompletionTrendRow{}
+	for d, c := range byDay {
+		day, _ := time.Parse("2006-01-02", d)
+		out = append(out, repository.CompletionTrendRow{Day: day, Count: c})
+	}
+	return out, nil
+}
+
+func (f *fakeQuerier) CreateHabit(_ context.Context, arg repository.CreateHabitParams) (repository.Habit, error) {
+	h := repository.Habit{ID: uuid.New(), UserID: arg.UserID, Name: arg.Name, CreatedAt: time.Now()}
+	f.habits[h.ID] = h
+	return h, nil
+}
+
+func (f *fakeQuerier) ListHabits(_ context.Context, userID uuid.UUID) ([]repository.Habit, error) {
+	out := []repository.Habit{}
+	for _, h := range f.habits {
+		if h.UserID == userID {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeQuerier) GetHabit(_ context.Context, arg repository.GetHabitParams) (repository.Habit, error) {
+	if h, ok := f.habits[arg.ID]; ok && h.UserID == arg.UserID {
+		return h, nil
+	}
+	return repository.Habit{}, pgx.ErrNoRows
+}
+
+func (f *fakeQuerier) DeleteHabit(_ context.Context, arg repository.DeleteHabitParams) (int64, error) {
+	if h, ok := f.habits[arg.ID]; ok && h.UserID == arg.UserID {
+		delete(f.habits, arg.ID)
+		delete(f.checkins, arg.ID)
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func (f *fakeQuerier) CheckInHabit(_ context.Context, arg repository.CheckInHabitParams) error {
+	set := f.checkins[arg.HabitID]
+	if set == nil {
+		set = map[string]bool{}
+		f.checkins[arg.HabitID] = set
+	}
+	set[arg.Day.UTC().Format("2006-01-02")] = true
+	return nil
+}
+
+func (f *fakeQuerier) UncheckHabit(_ context.Context, arg repository.UncheckHabitParams) error {
+	if set := f.checkins[arg.HabitID]; set != nil {
+		delete(set, arg.Day.UTC().Format("2006-01-02"))
+	}
+	return nil
+}
+
+func (f *fakeQuerier) ListCheckinsSince(_ context.Context, arg repository.ListCheckinsSinceParams) ([]repository.ListCheckinsSinceRow, error) {
+	out := []repository.ListCheckinsSinceRow{}
+	for hid, set := range f.checkins {
+		h, ok := f.habits[hid]
+		if !ok || h.UserID != arg.UserID {
+			continue
+		}
+		for d := range set {
+			day, _ := time.Parse("2006-01-02", d)
+			if !day.Before(arg.Day) {
+				out = append(out, repository.ListCheckinsSinceRow{HabitID: hid, Day: day})
+			}
+		}
+	}
+	return out, nil
 }

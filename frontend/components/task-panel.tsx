@@ -19,9 +19,11 @@ export function TaskPanel({ token }: { token: string }) {
   const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: () => api.listTasks(token) });
 
   const [priority, setPriority_] = useState<PriorityResult | null>(null);
-  // Ranking is a snapshot — drop it whenever the task set changes.
+  // Ranking is a snapshot — drop it whenever the task set changes. Also refresh
+  // the Insights panel, which is derived from tasks.
   const refresh = () => {
     setPriority_(null);
+    qc.invalidateQueries({ queryKey: ["stats"] });
     return qc.invalidateQueries({ queryKey: ["tasks"] });
   };
 

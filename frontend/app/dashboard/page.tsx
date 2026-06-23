@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Wordmark } from "@/components/brand";
+import { HabitsPanel } from "@/components/habits-panel";
+import { InsightsPanel } from "@/components/insights-panel";
 import { PlanPanel } from "@/components/plan-panel";
 import { TaskPanel } from "@/components/task-panel";
 import { Button, Spinner } from "@/components/ui";
@@ -50,9 +52,13 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <TaskPanel token={token} />
-          <PlanPanel token={token} />
+        <div className="space-y-5">
+          <InsightsPanel token={token} />
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <TaskPanel token={token} />
+            <PlanPanel token={token} />
+          </div>
+          <HabitsPanel token={token} />
         </div>
       </main>
     </div>

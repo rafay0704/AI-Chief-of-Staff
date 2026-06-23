@@ -122,3 +122,45 @@ Synchronous Claude calls (return directly, ~1–2s) — unlike the queued daily 
 { "task_id": "uuid", "steps": [ { "order": 1, "title": "Read pgx docs", "duration_minutes": 30 } ] }
 ```
 → `404` if the task doesn't exist / isn't yours.
+
+### `POST /ai/weekly-report`  — narrative productivity review
+→ `200`
+```json
+{ "headline": "string", "summary": "string", "wins": ["..."], "watch_outs": ["..."], "suggestions": ["..."] }
+```
+→ `400` if there are no tasks to report on.
+
+> **Planner focus mode:** `POST /plans/generate` accepts an optional `"mode"`:
+> `balanced` (default) · `deep_focus` · `stress_relief` · `light`, which reshapes the generated day.
+
+---
+
+## Analytics  🔒
+
+### `GET /stats`  — productivity snapshot
+→ `200`
+```json
+{
+  "total_tasks": 8, "completed": 3, "pending": 5,
+  "completion_rate": 0.375,
+  "pending_minutes": 240, "completed_minutes": 130,
+  "by_priority": { "high": 2, "medium": 3, "low": 3 },
+  "plans_generated": 2,
+  "trend": [ { "date": "2026-06-18", "completed": 0 }, ... 7 days ... ]
+}
+```
+
+---
+
+## Habits  🔒
+
+Habit object: `{ "id", "name", "created_at", "streak", "checkins": ["YYYY-MM-DD", ...] }`
+(`checkins` covers the last 28 days; `streak` is consecutive checked days ending today/yesterday).
+
+| Method | Path | Body | Result |
+|---|---|---|---|
+| `GET` | `/habits` | — | `200 { "habits": [...] }` |
+| `POST` | `/habits` | `{ "name" }` | `201` habit |
+| `DELETE` | `/habits/:id` | — | `204` |
+| `POST` | `/habits/:id/checkin` | `{ "date"? }` (default today) | `204` |
+| `DELETE` | `/habits/:id/checkin?date=YYYY-MM-DD` | — (default today) | `204` |

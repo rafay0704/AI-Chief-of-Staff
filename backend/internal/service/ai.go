@@ -16,12 +16,13 @@ import (
 // case the methods return domain.ErrUnavailable.
 type AIService struct {
 	tasks  *TaskService
+	stats  *StatsService
 	agents *ai.Agents
 }
 
 // NewAIService constructs an AIService. Pass agents=nil when AI is unconfigured.
-func NewAIService(tasks *TaskService, agents *ai.Agents) *AIService {
-	return &AIService{tasks: tasks, agents: agents}
+func NewAIService(tasks *TaskService, stats *StatsService, agents *ai.Agents) *AIService {
+	return &AIService{tasks: tasks, stats: stats, agents: agents}
 }
 
 // Prioritize ranks the user's pending tasks and flags drop candidates.
@@ -50,4 +51,29 @@ func (s *AIService) Breakdown(ctx context.Context, userID, taskID uuid.UUID) (ai
 		return ai.Breakdown{}, err
 	}
 	return s.agents.Break(ctx, task)
+}
+
+// WeeklyReport writes a narrative review of the user's recent productivity.
+func (s *AIService) WeeklyReport(ctx context.Context, userID uuid.UUID) (ai.WeeklyReport, error) {
+	if s.agents == nil {
+		return ai.WeeklyReport{}, fmt.Errorf("%w: AI is not configured", domain.ErrUnavailable)
+	}
+	st, err := s.stats.Get(ctx, userID)
+	if err != nil {
+		return ai.WeeklyReport{}, err
+	}
+	tasks, err := s.tasks.List(ctx, userID, ListTaskFilter{})
+	if err != nil {
+		return ai.WeeklyReport{}, err
+	}
+	if len(tasks) == 0 {
+		return ai.WeeklyReport{}, fmt.Errorf("%w: add some tasks before generating a report", domain.ErrValidation)
+	}
+	return s.agents.Report(ctx, ai.ReportInput{
+		Completed:        st.Completed,
+		Pending:          st.Pending,
+		CompletedMinutes: st.CompletedMinutes,
+		PlansGenerated:   st.PlansGenerated,
+		Tasks:            tasks,
+	})
 }

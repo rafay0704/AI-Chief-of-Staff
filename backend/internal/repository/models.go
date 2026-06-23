@@ -152,6 +152,19 @@ type DailyPlan struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+type Habit struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type HabitCheckin struct {
+	HabitID   uuid.UUID `json:"habit_id"`
+	Day       time.Time `json:"day"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Task struct {
 	ID              uuid.UUID    `json:"id"`
 	UserID          uuid.UUID    `json:"user_id"`

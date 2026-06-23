@@ -111,6 +111,28 @@ func (b Breakdown) Validate() error {
 	return nil
 }
 
+// ── Reporter agent output ─────────────────────────────────────────────────────
+
+// WeeklyReport is the Reporter agent's narrative weekly review.
+type WeeklyReport struct {
+	Headline    string   `json:"headline"`
+	Summary     string   `json:"summary"`
+	Wins        []string `json:"wins"`
+	WatchOuts   []string `json:"watch_outs"`
+	Suggestions []string `json:"suggestions"`
+}
+
+// Validate checks the report has the essential narrative fields.
+func (r WeeklyReport) Validate() error {
+	if strings.TrimSpace(r.Headline) == "" {
+		return fmt.Errorf("report: headline is required")
+	}
+	if strings.TrimSpace(r.Summary) == "" {
+		return fmt.Errorf("report: summary is required")
+	}
+	return nil
+}
+
 // ── Parsing helpers ───────────────────────────────────────────────────────────
 
 type validatable interface{ Validate() error }

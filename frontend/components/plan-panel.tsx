@@ -3,8 +3,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import type { Schedule, ScheduleItem } from "@/lib/schemas";
+import type { PlanMode, Schedule, ScheduleItem } from "@/lib/schemas";
 import { Button, Card, Input, Label, Spinner, cn } from "./ui";
+
+const MODES: { value: PlanMode; label: string }[] = [
+  { value: "balanced", label: "Balanced" },
+  { value: "deep_focus", label: "Deep focus" },
+  { value: "stress_relief", label: "Stress-relief" },
+  { value: "light", label: "Light" },
+];
 
 function todayISO(): string {
   const d = new Date();
@@ -26,6 +33,7 @@ export function PlanPanel({ token }: { token: string }) {
   const [date, setDate] = useState(todayISO());
   const [minutes, setMinutes] = useState(480);
   const [goals, setGoals] = useState("");
+  const [mode, setMode] = useState<PlanMode>("balanced");
 
   // Stored plan for the selected date (404 → none). The single source of truth.
   const planQuery = useQuery({
@@ -70,6 +78,7 @@ export function PlanPanel({ token }: { token: string }) {
       api.generatePlan(token, {
         date,
         available_minutes: minutes,
+        mode,
         goals: goals
           .split(",")
           .map((g) => g.trim())
@@ -120,6 +129,27 @@ export function PlanPanel({ token }: { token: string }) {
           placeholder="ship the release, deep work on auth"
         />
       </div>
+      <div className="mt-3">
+        <Label htmlFor="mode">Focus mode</Label>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Focus mode">
+          {MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              onClick={() => setMode(m.value)}
+              className={cn(
+                "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+                mode === m.value
+                  ? "border-accent/40 bg-accent/15 text-accent"
+                  : "border-border bg-surface-2 text-muted hover:text-fg",
+              )}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <Button
         className="mt-3"
         loading={generate.isPending || isWorking}

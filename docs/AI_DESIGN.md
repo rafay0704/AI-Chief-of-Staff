@@ -94,3 +94,18 @@ Rules:
 | 429 / 5xx | exponential backoff retry (capped) |
 | Timeout | cancel via context, mark transient, re-enqueue |
 | Empty schedule | validation error → job `failed` |
+
+## V2 additions (Batch 7)
+
+### 4. Reporter Agent (`reporter-v1`)
+Synchronous (`POST /ai/weekly-report`). Given the user's task counts, focus minutes, plans generated,
+and task list, returns a narrative review:
+```json
+{ "headline": "string", "summary": "string", "wins": ["..."], "watch_outs": ["..."], "suggestions": ["..."] }
+```
+
+### Planner focus modes
+`POST /plans/generate` accepts `mode` ∈ `balanced | deep_focus | stress_relief | light`. The planner
+appends a mode-specific instruction to the prompt (e.g. stress-relief trims to 2–3 tasks with more rest).
+All four interactive AI calls (prioritize, breakdown, weekly-report) are synchronous; only daily plan
+generation is queued. See `docs/DECISIONS.md` ADR-011.

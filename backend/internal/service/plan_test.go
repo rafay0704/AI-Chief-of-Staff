@@ -26,7 +26,7 @@ func TestGenerateEnqueuesAndPersistsQueued(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
 
-	plan, err := svc.Generate(ctx, userID, "2026-06-22", 300, []string{"ship batch 4"})
+	plan, err := svc.Generate(ctx, userID, "2026-06-22", 300, []string{"ship batch 4"}, "balanced")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestGenerateEnqueuesAndPersistsQueued(t *testing.T) {
 
 func TestGenerateRejectsBadDate(t *testing.T) {
 	svc := NewPlanService(newFakeQuerier(), &fakeEnqueuer{})
-	_, err := svc.Generate(context.Background(), uuid.New(), "22-06-2026", 300, nil)
+	_, err := svc.Generate(context.Background(), uuid.New(), "22-06-2026", 300, nil, "")
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected ErrValidation, got %v", err)
 	}
@@ -64,11 +64,11 @@ func TestGenerateIsIdempotentPerDate(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
 
-	p1, err := svc.Generate(ctx, userID, "2026-06-22", 300, nil)
+	p1, err := svc.Generate(ctx, userID, "2026-06-22", 300, nil, "")
 	if err != nil {
 		t.Fatalf("first generate: %v", err)
 	}
-	p2, err := svc.Generate(ctx, userID, "2026-06-22", 480, nil)
+	p2, err := svc.Generate(ctx, userID, "2026-06-22", 480, nil, "")
 	if err != nil {
 		t.Fatalf("second generate: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestPlanLifecycleStatusTransitions(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
 
-	plan, err := svc.Generate(ctx, userID, "2026-06-22", 300, nil)
+	plan, err := svc.Generate(ctx, userID, "2026-06-22", 300, nil, "")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}

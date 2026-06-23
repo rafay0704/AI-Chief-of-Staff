@@ -103,3 +103,46 @@ export const breakdownSchema = z.object({
   ),
 });
 export type Breakdown = z.infer<typeof breakdownSchema>;
+
+// GET /stats response.
+export const statsSchema = z.object({
+  total_tasks: z.number(),
+  completed: z.number(),
+  pending: z.number(),
+  completion_rate: z.number(),
+  pending_minutes: z.number(),
+  completed_minutes: z.number(),
+  by_priority: z.object({ high: z.number(), medium: z.number(), low: z.number() }),
+  plans_generated: z.number(),
+  trend: z.array(z.object({ date: z.string(), completed: z.number() })),
+});
+export type Stats = z.infer<typeof statsSchema>;
+
+// POST /ai/weekly-report response.
+const strList = z
+  .array(z.string())
+  .nullish()
+  .transform((v) => v ?? []);
+export const weeklyReportSchema = z.object({
+  headline: z.string(),
+  summary: z.string(),
+  wins: strList,
+  watch_outs: strList,
+  suggestions: strList,
+});
+export type WeeklyReport = z.infer<typeof weeklyReportSchema>;
+
+// Planner focus modes.
+export const planModeSchema = z.enum(["balanced", "deep_focus", "stress_relief", "light"]);
+export type PlanMode = z.infer<typeof planModeSchema>;
+
+// Habit (GET /habits).
+export const habitSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  created_at: z.string(),
+  streak: z.number(),
+  checkins: z.array(z.string()),
+});
+export type Habit = z.infer<typeof habitSchema>;
+export const habitsResponseSchema = z.object({ habits: z.array(habitSchema) });

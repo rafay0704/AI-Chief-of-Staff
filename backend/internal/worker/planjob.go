@@ -40,6 +40,7 @@ func PlanHandler(plans *service.PlanService, tasks *service.TaskService, agents 
 			AvailableMinutes: p.AvailableMinutes,
 			Goals:            p.Goals,
 			Tasks:            userTasks,
+			Mode:             p.Mode,
 		})
 		if err != nil {
 			l.Warn("plan generation failed", "err", err)

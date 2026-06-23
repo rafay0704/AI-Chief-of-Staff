@@ -12,6 +12,7 @@ type PlanInput struct {
 	AvailableMinutes int
 	Goals            []string
 	Tasks            []domain.Task
+	Mode             string // "", balanced, deep_focus, stress_relief, light
 }
 
 // Agents bundles the three planning agents over a shared Completer.
@@ -52,6 +53,17 @@ func (a *Agents) Break(ctx context.Context, task domain.Task) (Breakdown, error)
 	var out Breakdown
 	err := a.runWithRepair(ctx, breakdownSystem, user, func(raw string) error {
 		out = Breakdown{}
+		return parseStrict(raw, &out)
+	})
+	return out, err
+}
+
+// Report writes a narrative weekly productivity review.
+func (a *Agents) Report(ctx context.Context, in ReportInput) (WeeklyReport, error) {
+	user := buildReporterUser(in)
+	var out WeeklyReport
+	err := a.runWithRepair(ctx, reporterSystem, user, func(raw string) error {
+		out = WeeklyReport{}
 		return parseStrict(raw, &out)
 	})
 	return out, err

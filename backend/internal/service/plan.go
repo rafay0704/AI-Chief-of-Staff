@@ -27,6 +27,7 @@ type PlanJobPayload struct {
 	Date             string    `json:"date"`
 	AvailableMinutes int       `json:"available_minutes"`
 	Goals            []string  `json:"goals"`
+	Mode             string    `json:"mode"`
 }
 
 // Enqueuer is the subset of the queue used by PlanService (eases testing).
@@ -47,7 +48,7 @@ func NewPlanService(repo repository.Querier, q Enqueuer) *PlanService {
 
 // Generate creates (or resets) the plan for a date and enqueues a job to build
 // it. It returns immediately with the queued plan; the worker fills it in.
-func (s *PlanService) Generate(ctx context.Context, userID uuid.UUID, date string, availableMinutes int, goals []string) (domain.Plan, error) {
+func (s *PlanService) Generate(ctx context.Context, userID uuid.UUID, date string, availableMinutes int, goals []string, mode string) (domain.Plan, error) {
 	d, err := time.Parse(dateLayout, date)
 	if err != nil {
 		return domain.Plan{}, fmt.Errorf("%w: date must be YYYY-MM-DD", domain.ErrValidation)
@@ -64,6 +65,7 @@ func (s *PlanService) Generate(ctx context.Context, userID uuid.UUID, date strin
 		Date:             date,
 		AvailableMinutes: availableMinutes,
 		Goals:            goals,
+		Mode:             mode,
 	})
 	if err != nil {
 		return domain.Plan{}, fmt.Errorf("build job: %w", err)
