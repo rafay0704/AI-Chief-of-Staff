@@ -1,11 +1,13 @@
-# 📚 Learning ACOS — A Production-Grade Go + Next.js Walkthrough
+# 📚 Learning ACOS — A Beginner's Full Walkthrough (Go + Next.js + Claude)
 
-> **Who this is for:** you — a Node/Next developer who just learned Go. This doc explains
-> not just *what* the code does, but *why* it's structured this way, and how each decision
-> maps to the production patterns you'll see in real Go shops. Where Go differs from the
-> Node mental model, I call it out explicitly: **🟢 Node → Go**.
-
-Read this top-to-bottom once, then keep it open as a map while you click through the files.
+> **Who this is for:** you — a Node/Next developer who just learned Go and wants to *understand*
+> this project deeply, not just run it. This doc explains **what** each part does, **why** it's
+> built that way, and **how the pieces talk to each other**. Where Go differs from the Node mental
+> model, it's flagged: **🟢 Node → Go**.
+>
+> **How to read it:** skim §0–§2 for the big picture, then read §7 (AI) and §8 (UI↔backend) slowly —
+> those are the two things you asked about. §13 is a plain-English glossary; jump there any time a
+> word is unfamiliar.
 
 ---
 
@@ -13,382 +15,684 @@ Read this top-to-bottom once, then keep it open as a map while you click through
 
 ```
                       ┌──────────────────────────────────────────────┐
-   Browser            │                  Next.js (3000)               │
-   (you)  ───────────▶│  React + TanStack Query + Zod                 │
-                      │  proxies /api/* ──▶ backend (no CORS)         │
+   Browser            │                  Next.js (port 3000)          │
+   (you click)  ─────▶│  React + TanStack Query + Zod                 │
+                      │  proxies /api/* ──▶ backend (so: no CORS)     │
                       └───────────────────────┬──────────────────────┘
-                                              │ HTTP + JWT
+                                              │ HTTP request + JWT token
                       ┌───────────────────────▼──────────────────────┐
-                      │              Go API server (8080)             │
+                      │           Go API server (port 8080)           │
                       │  Gin → middleware → handler → service → repo  │
-                      └─────┬───────────────────────────────┬────────┘
-                            │ SQL (pgx/sqlc)                 │ LPUSH job
-                  ┌─────────▼─────────┐            ┌─────────▼─────────┐
-                  │  PostgreSQL 17    │            │     Redis 7       │
-                  │  (source of truth)│            │  (durable queue)  │
-                  └─────────▲─────────┘            └─────────┬─────────┘
-                            │ SetPlanDone                    │ BLMOVE (claim)
-                      ┌─────┴───────────────────────────────▼─────────┐
-                      │            Go worker pool (separate binary)    │
-                      │  dispatcher + N goroutines → Claude (Anthropic)│
-                      └────────────────────────────────────────────────┘
+                      └─────┬─────────────────────┬───────────────────┘
+                            │ SQL (pgx/sqlc)      │ LPUSH job (heavy AI work)
+                  ┌─────────▼────────┐   ┌────────▼────────┐
+                  │  PostgreSQL 17   │   │     Redis 7     │
+                  │ (source of truth)│   │ (durable queue) │
+                  └─────────▲────────┘   └────────┬────────┘
+                            │ save result          │ BLMOVE (claim job)
+                      ┌─────┴──────────────────────▼─────────────────┐
+                      │      Go worker pool (a SEPARATE binary)       │
+                      │  dispatcher + N goroutines → Claude (AI)      │
+                      └───────────────────────────────────────────────┘
 ```
 
-**Two binaries, one codebase.** `cmd/server` serves HTTP; `cmd/worker` drains the queue.
-They share everything under `internal/`. This is the single most important architectural
-idea in the project — keep it in mind as you read.
+There are **two running Go programs** that share one codebase:
+
+- **`cmd/server`** — answers HTTP requests fast. Never does slow work itself.
+- **`cmd/worker`** — sits in a loop pulling "jobs" off Redis and doing the slow AI work.
+
+Plus **Postgres** (permanent data) and **Redis** (a to-do list of background jobs). The Next.js app
+is the UI. Hold this picture in your head; everything below is a zoom-in on one box.
 
 ---
 
-## 1. Folder structure — and *why* each folder exists
+## 1. Why two binaries? (the single most important idea)
+
+Generating a daily plan calls Claude, which takes ~2–5 seconds. If the HTTP request did that itself,
+the user's browser would hang for 5 seconds and your server could only handle a handful of people at
+once.
+
+So instead:
+
+1. The **server** writes a "please generate a plan" note onto a Redis list and **immediately** replies
+   "OK, it's queued" (milliseconds).
+2. The **worker** — a different process — picks up that note, calls Claude, and saves the result to
+   Postgres.
+3. The browser **polls** ("is it done yet?") every 1.5s until the plan appears.
+
+This is the classic **"fast request, deferred work"** pattern. It's the spine of the whole project.
+Both programs `import` the same `internal/` packages, so there's zero code duplication —
+`cmd/server/main.go` and `cmd/worker/main.go` are just two different "wirings" of the same Lego bricks.
+
+> 🟢 **Node → Go:** in Node you'd reach for BullMQ + a separate worker script. Same idea here, but the
+> queue is hand-built on Redis (to *show* the mechanics) and the worker is a compiled Go binary.
+
+---
+
+## 2. The backend, part by part
+
+Everything real lives in `backend/internal/`. `internal/` is a **magic folder name** in Go: the
+compiler forbids any code outside this module from importing it. It's privacy enforced by the
+compiler, not by politeness.
+
+Here's each package, what it's responsible for, and the one concept it teaches.
 
 ```
 backend/
-├── cmd/                  ← ENTRYPOINTS. Each subdir = one runnable binary (package main).
-│   ├── server/           ← the HTTP API
-│   ├── worker/           ← the background job processor
-│   ├── migrate/          ← runs DB migrations (golang-migrate as a library)
-│   └── enqueue/          ← dev tool to push demo jobs (test the queue by hand)
+├── cmd/                ENTRYPOINTS — each subfolder is one runnable program (`package main`)
+│   ├── server/         the HTTP API           → go run ./cmd/server
+│   ├── worker/         the background processor→ go run ./cmd/worker
+│   ├── migrate/        applies DB schema changes
+│   └── enqueue/        a dev toy to push fake jobs and watch the queue
 │
-├── internal/            ← ALL real code. "internal" is special: Go forbids
-│   │                       importing it from outside this module. Encapsulation
-│   │                       enforced by the compiler, not by convention.
-│   │
-│   ├── config/           ← load + validate env into a typed Config struct
-│   ├── domain/           ← pure business types & errors. NO imports of db/http/redis.
-│   ├── repository/       ← data access. sqlc-GENERATED code + your .sql files.
-│   ├── service/          ← business logic. Orchestrates repo + queue + ai.
-│   ├── http/             ← transport layer: router, handlers, middleware.
-│   ├── worker/           ← the goroutine pool + job handlers.
-│   ├── queue/            ← the Redis-list queue primitive (Enqueue/Claim/Ack…).
-│   ├── ai/               ← the Claude client + typed "agents" + prompts.
-│   ├── auth/             ← JWT signing/parsing + token manager.
-│   └── platform/         ← thin wrappers around external infra (db, redis, logger).
-│
-├── migrations/          ← versioned SQL schema (000001_init.up/down.sql)
-├── sqlc.yaml            ← config: "turn these .sql files into typed Go"
-├── Makefile             ← the command palette (make run, make worker, …)
-└── .air.toml           ← live-reload config for local dev
+└── internal/
+    ├── config/         reads .env → one typed Config struct, validated at boot
+    ├── domain/         the pure "nouns" of the app (Task, Plan, Habit, Stats) + error values.
+    │                   Imports NOTHING from the app — it's the stable core everyone depends on.
+    ├── platform/       thin wrappers around infrastructure:
+    │   ├── db/         creates the Postgres connection pool (pgxpool)
+    │   ├── redis/      creates the Redis client
+    │   └── logger/     creates the structured logger (slog) + request-id helpers
+    ├── repository/     DATA ACCESS. Your .sql files + the Go that sqlc GENERATES from them.
+    ├── service/        BUSINESS LOGIC. The "brain" — orchestrates repo + queue + ai.
+    ├── http/           TRANSPORT. Gin router, handlers (HTTP↔service), middleware.
+    ├── queue/          the Redis-list job queue primitive (Enqueue/Claim/Ack/Retry…)
+    ├── worker/         the goroutine worker pool + the job handlers
+    ├── ai/             the Claude client + the 4 "agents" + prompts + JSON schemas
+    └── auth/           JWT token signing/parsing
 ```
 
-### 🟢 Node → Go: the folder philosophy
-In Express you might have `routes/`, `controllers/`, `models/` and wire them loosely.
-Go production apps lean on the **`cmd/` + `internal/`** convention:
+### The layering rule (memorize this one picture)
 
-- **`cmd/`** = "what can I run?" Each folder is a `main` package = one binary. This is
-  why ACOS can ship a server *and* a worker from one repo with zero duplication.
-- **`internal/`** = "the library." The `internal` name is a **compiler-enforced** privacy
-  boundary — no other module can import your guts. There's no equivalent in Node; it's
-  closer to "everything is private unless you publish it."
-
-### The layering rule (memorize this)
-Dependencies point **inward and downward**, never up:
+Dependencies only point **inward / downward**, never back up:
 
 ```
-http ──▶ service ──▶ repository ──▶ Postgres
-            │
-            ├──▶ queue ──▶ Redis
-            └──▶ ai    ──▶ Claude
-         (everyone may import) domain
+http (handlers) ──▶ service ──▶ repository ──▶ Postgres
+                       │
+                       ├──▶ queue ──▶ Redis
+                       └──▶ ai    ──▶ Claude
+                    everyone may import ▶ domain  (domain imports nobody)
 ```
 
-- `domain` imports **nothing** from the app — it's the stable core.
-- `http` (handlers) never touches the DB directly; it calls a `service`.
-- `service` never speaks HTTP; it takes plain args and returns domain types.
+What this buys you, concretely:
+- A **handler** never runs SQL. It calls a **service**. So you could swap Gin for another router and
+  the business logic wouldn't notice.
+- A **service** never speaks HTTP (no status codes, no JSON). It takes plain Go arguments and returns
+  `domain` types or an `error`. So the *same* `PlanService` is used by both the server (to enqueue)
+  and the worker (to save results).
+- `domain` depends on nothing, so it can never cause an import cycle and is trivial to test.
 
-Why this matters: you can test a service with a fake repo, swap Gin for another router,
-or reuse the *same* service from both the HTTP server and the worker — which is exactly
-what `PlanService` does.
+> 🟢 **Node → Go:** Express apps often blur routes/controllers/models. Go shops lean hard on this
+> layered, one-direction dependency rule because it makes large codebases stay testable and swappable.
+
+### A note on each layer's "shape"
+
+- **handler** (e.g. `internal/http/handler/task.go`): *thin*. Decode JSON → call service → translate
+  the result to an HTTP status + JSON. ~3 steps, no logic.
+- **service** (e.g. `internal/service/task.go`): *the logic*. Validation, defaults, deciding what to
+  do, mapping DB rows → domain types. Returns `domain.ErrValidation` etc. on bad input.
+- **repository** (`internal/repository/*.sql.go`): *generated*. One Go function per SQL query.
 
 ---
 
-## 2. The request lifecycle (trace one call end-to-end)
+## 3. The request lifecycle — trace ONE call end-to-end
 
-Let's follow **"Generate plan"** because it touches every layer and the async pipeline.
+Follow **"Generate plan"** — it touches every layer and the async pipeline.
 
-### Step 1 — Frontend fires the request
-`frontend/components/plan-panel.tsx` → `api.generatePlan(token, {...})` →
-`POST /api/plans/generate`. Next.js rewrites `/api/*` to `http://localhost:8080/*`
-(`next.config.ts`), so there's **no CORS** to configure.
-
-### Step 2 — Router + middleware
-`internal/http/router.go` puts this route behind `middleware.Auth(tokens)`. The chain is:
 ```
-RequestID → Logger → Recovery → Auth → handler
+[Browser] click "Generate plan"
+   │  api.generatePlan(token, {...})           frontend/lib/api.ts
+   ▼
+POST /api/plans/generate                        (Next.js proxy → :8080/plans/generate)
+   │
+   ▼  RequestID → Logger → Recovery → Auth → handler     internal/http/router.go
+[Handler] GeneratePlan                          internal/http/handler/plan.go
+   │   1. validate JSON body (date, minutes, mode…)
+   │   2. read userID from context (the Auth middleware put it there)
+   │   3. call service ──┐
+   ▼                     ▼
+[Service] PlanService.Generate                  internal/service/plan.go
+   │   1. UpsertPlanQueued → write daily_plans row, status='queued'   (Postgres)
+   │   2. Enqueue a Job (LPUSH) onto Redis                            (the plan id IS the job id)
+   │   3. return the queued plan immediately  ── HTTP responds 202 in ~5ms
+   ▼
+... (the request is already DONE; the rest happens in the other process) ...
+
+[Worker] dispatcher is blocked on queue.Claim (BLMOVE)  internal/worker/pool.go
+   │   job arrives → handed to a free goroutine
+   ▼
+[Worker] PlanHandler                            internal/worker/planjob.go
+   │   1. MarkRunning  → status='running'
+   │   2. load the user's pending tasks (service)
+   │   3. agents.Plan(...) → call Claude, get a Schedule   internal/ai
+   │   4. Complete → status='done' + store plan_json       (or Fail → status='failed')
+   ▼
+[Postgres] daily_plans row now status='done' with the schedule JSON
+
+[Browser] TanStack Query polls GET /api/plans/jobs/:id every 1.5s
+   │   while status is queued|running → keep polling
+   ▼   status flips to 'done' → stop polling, render the schedule
 ```
-`Auth` validates the JWT and stuffs the `userID` into the Gin context. If the token is
-bad, the handler never runs.
 
-### Step 3 — Handler (transport only)
-`internal/http/handler/plan.go` does three things and nothing more:
-1. **Decode + validate** the JSON body into a request struct.
-2. Pull `userID` from context.
-3. Call `h.Plans.Generate(ctx, userID, …)` and **translate the result to HTTP** (status
-   code + JSON). Business rules do *not* live here.
-
-### Step 4 — Service (the brain)
-`internal/service/plan.go` → `PlanService.Generate`:
-1. Parses/validates the date (returns `domain.ErrValidation` on bad input).
-2. `repo.UpsertPlanQueued(...)` → writes a `daily_plans` row with `status='queued'`
-   (Postgres). **The row's `id` becomes the job id.**
-3. Builds a `queue.Job` with the payload and `queue.Enqueue` → `LPUSH` onto Redis.
-4. Returns the queued plan **immediately**. The HTTP call finishes in milliseconds;
-   the slow Claude work happens elsewhere. This is the async pattern.
-
-### Step 5 — Worker picks it up (different process!)
-`cmd/worker` runs a `worker.Pool`. Its dispatcher goroutine is blocked on
-`queue.Claim` (a Redis `BLMOVE`). The moment your job lands, it's claimed and handed to
-a free worker goroutine, which runs the `plan` handler (`internal/worker/planjob.go`):
-1. `MarkRunning` → updates the row to `status='running'`.
-2. Loads the user's tasks, calls the Claude **Planner agent** (`internal/ai`).
-3. `Complete(planID, scheduleJSON)` → `status='done'` + stores `plan_json`.
-   On error → `Fail(planID, reason)` → `status='failed'`.
-
-### Step 6 — Frontend polls to completion
-Back in `plan-panel.tsx`, TanStack Query polls `GET /plans/jobs/:id` every 1.5s **only
-while** status is `queued|running` (see `refetchInterval`). When it flips to `done`, an
-effect invalidates the stored-plan query and the schedule renders. Notice the UI never
-holds a connection open — it's stateless polling, which scales trivially.
-
-> **This is the whole point of the project.** A fast, stateless HTTP request that *defers*
-> expensive work to a durable queue, processed by a separately-scalable pool, with the
-> client polling for the result. That's a textbook production async pattern.
+The key insight: **steps after "return the queued plan" run in a different program, minutes-of-CPU
+later, while the user's HTTP request already finished.** That decoupling is the whole point.
 
 ---
 
-## 3. The data layer: sqlc + pgx (no ORM)
+## 4. The data layer: migrations + sqlc + pgx (no ORM)
 
-ACOS deliberately uses **no ORM**. Instead:
+Three pieces work together so you write **real SQL** but call it with **type-safe Go**.
 
-1. You write plain SQL in `internal/repository/queries/*.sql` with magic comments:
-   ```sql
-   -- name: UpsertPlanQueued :one
-   INSERT INTO daily_plans (user_id, plan_date, status)
-   VALUES ($1, $2, 'queued')
-   ON CONFLICT (user_id, plan_date)
-   DO UPDATE SET status = 'queued', plan_json = NULL, error = NULL, updated_at = now()
-   RETURNING ...;
-   ```
-2. `make sqlc` reads `sqlc.yaml` and **generates type-safe Go** (`*.sql.go`) — a function
-   per query, with a typed params struct and a typed return. The generated files are the
-   ones like `plans.sql.go`, `tasks.sql.go`.
-3. Your `service` calls those generated methods through the `Querier` interface.
+**(a) Migrations** (`backend/migrations/*.sql`) — versioned schema changes. `000001_init.up.sql`
+creates `users`/`tasks`/`daily_plans`; `000002_habits.up.sql` adds the habit tables. `make migrate-up`
+applies them in order and records which ran, so the DB schema is reproducible from zero.
+> *Migration = a numbered SQL file that changes the database structure. `.up` applies it, `.down`
+> reverses it.*
 
-### 🟢 Node → Go: why no ORM (e.g. Prisma/TypeORM)?
-- **Compile-time safety without runtime magic.** sqlc parses your SQL *and* your schema,
-  so a typo in a column name fails `make sqlc`, not production. Prisma gives you types too,
-  but via a generated client + query engine; sqlc is just functions over `pgx`.
-- **You write real SQL.** No query-builder dialect to learn, no "how do I express this
-  join in the ORM" — you already know SQL.
-- **`Querier` is an interface**, so services depend on an abstraction. Tests pass a fake
-  (`internal/service/fake_test.go`); real runs pass the pgx-backed impl. This is
-  dependency inversion, and it's why the service tests don't need a database.
+**(b) sqlc** turns SQL into Go. You write a query with a magic comment:
+```sql
+-- name: GetTask :one
+SELECT * FROM tasks WHERE id = $1 AND user_id = $2;
+```
+`make sqlc` reads your schema + queries and **generates** `tasks.sql.go` with:
+```go
+func (q *Queries) GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
+```
+A typo in a column name fails `make sqlc` on your laptop — not in production. You get ORM-like safety
+with zero ORM runtime.
 
-`pgx/v5` is the Postgres driver (faster + more Postgres-native than `database/sql`).
-The connection **pool** is created once in `platform/db/db.go` and shared.
+**(c) pgx** is the Postgres driver. `platform/db/db.go` creates **one connection pool** at startup and
+shares it. A pool keeps a handful of open connections so each query doesn't pay connect cost.
+
+### The `Querier` interface (why services are testable)
+
+sqlc also generates an **interface** `Querier` listing every query method. Services depend on that
+interface, not the concrete DB type:
+```go
+type TaskService struct { repo repository.Querier }   // ← an interface, not a *pgx pool
+```
+In production you pass the real pgx-backed implementation. In **tests** you pass a fake map-backed one
+(`internal/service/fake_test.go`). That's why service tests run in milliseconds with **no database**.
+This is *dependency inversion* — the single most useful OO idea in the whole backend.
+
+> 🟢 **Node → Go:** like swapping a real Prisma client for a mock, but the "interface" is a real
+> language feature the compiler checks, and the fake is plain Go you can read.
 
 ---
 
-## 4. Concurrency: the worker pool (the Go showcase)
+## 5. Concurrency: the worker pool (Go's showcase)
 
-This is where Go earns its place. Read `internal/worker/pool.go` alongside this section.
-
-### The design (from the file's own doc comment)
-- **One dispatcher goroutine** does the blocking `Claim` and sends each job over an
-  **unbuffered channel**.
-- **N worker goroutines** (`WORKER_CONCURRENCY=4`) receive from that channel and process.
+Read `internal/worker/pool.go` next to this section.
 
 ```go
-deliveries := make(chan queue.Delivery)   // unbuffered!
-for i := 0; i < p.concurrency; i++ {
+deliveries := make(chan queue.Delivery)            // an UNBUFFERED channel
+for i := 0; i < p.concurrency; i++ {               // start N workers (default 4)
     go func(id int) { for d := range deliveries { p.process(...) } }(i)
 }
-p.dispatch(ctx, deliveries)               // dispatcher runs on the main goroutine
+p.dispatch(ctx, deliveries)                        // 1 dispatcher feeds the channel
 ```
 
-### 🟢 Node → Go: why this is special
-Node is single-threaded with an event loop; "concurrency" means async I/O, and CPU work
-blocks everyone. Go gives you **real parallel goroutines** (cheap, ~KB stacks) plus
-**channels** for safe communication. Key things to internalize here:
+- A **goroutine** is a function running concurrently — extremely cheap (~KB), so thousands are fine.
+- A **channel** is a typed pipe goroutines use to hand work to each other safely (no shared-memory
+  locks).
+- **One dispatcher** goroutine does the blocking Redis `Claim` and sends each job into the channel;
+  **N workers** receive and process.
 
-1. **Unbuffered channel = natural backpressure.** The dispatcher *cannot* claim a new job
-   until some worker is ready to receive (`out <- d` blocks). So you never pull more work
-   off Redis than you can process. You get flow control for free — no semaphore needed.
+Four production details worth internalizing:
 
-2. **Graceful shutdown via `context`.** `cmd/worker`/`cmd/server` build a context with
-   `signal.NotifyContext(..., SIGINT, SIGTERM)`. On Ctrl-C the context cancels; the
-   dispatcher stops claiming, `close(deliveries)` lets workers finish their *in-flight*
-   job, and `wg.Wait()` blocks until they're done. No job is dropped mid-flight.
-   > 🟢 Node has no built-in equivalent — you'd hand-roll signal handlers and track
-   > in-flight work yourself. In Go, `context.Context` is the standard plumbing for
-   > cancellation/deadlines and it threads through every layer.
+1. **Unbuffered channel = free backpressure.** `out <- d` *blocks* until some worker is ready to
+   receive. So the dispatcher can't pull more jobs off Redis than the pool can handle. Flow control
+   for free, no semaphore.
+2. **Graceful shutdown via `context`.** Both mains use `signal.NotifyContext(..., SIGINT, SIGTERM)`.
+   Ctrl-C cancels the context → dispatcher stops → `close(deliveries)` lets workers finish their
+   *in-flight* job → `wg.Wait()` blocks until they're done. No job dropped mid-flight.
+3. **Detached ack context.** `context.WithoutCancel(ctx)` makes a child context that ignores the
+   shutdown signal, so a job that finishes *during* shutdown can still be marked done in Redis.
+4. **Panic recovery.** `invoke()` wraps each handler in `recover()`, turning a crash into a normal
+   retry. One poison job can't kill the pool.
 
-3. **Detached context for acks.** Look at `process`:
-   ```go
-   ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.ackTimeout)
-   ```
-   The job's own context can be cancelled at shutdown, but you still need to Ack/Retry it.
-   `WithoutCancel` makes a child that ignores the parent's cancellation — so cleanup
-   completes even while shutting down. This is a subtle, genuinely production-grade detail.
-
-4. **Panics don't kill the pool.** `invoke` wraps the handler in `recover()` and converts a
-   panic into a `*PanicError`. One bad job can't take down your worker.
-   > 🟢 In Node an unhandled throw in an async handler can crash the process; here a panic
-   > is contained to one job and turned into a normal retry.
+> 🟢 **Node → Go:** Node is single-threaded; CPU work blocks everyone. Go gives real parallel
+> goroutines + channels. `context.Context` is the standard way to thread cancellation/timeouts through
+> every function — there's no Node equivalent baked into the language.
 
 ---
 
-## 5. The queue: durability with plain Redis lists
+## 6. The queue: durability with three Redis lists
 
-`internal/queue/queue.go` implements an at-least-once queue with **three lists**:
-`acos:jobs` (main), `acos:jobs:processing` (in-flight), `acos:jobs:dead` (dead-letter).
+`internal/queue/queue.go` is an **at-least-once** queue using three lists per namespace:
+`acos:jobs` (waiting), `acos:jobs:processing` (claimed/in-flight), `acos:jobs:dead` (gave up).
 
-| Operation | Redis command | Why |
+| Operation | Redis command | Why it's done this way |
 |---|---|---|
-| `Enqueue` | `LPUSH main` | add to head |
-| `Claim` | `BLMOVE main→processing` (blocking) | **atomically** move; if the worker crashes the job is still in `processing`, not lost |
+| `Enqueue` | `LPUSH main` | add a job to the front |
+| `Claim` | `BLMOVE main→processing` (blocking) | **atomically** move; if the worker dies after claiming, the job is still in `processing` — not lost |
 | `Ack` | `LREM processing` | success → forget it |
-| `Retry` | `LREM processing` + `LPUSH main` (attempt++), or → `dead` once exhausted | exponential backoff, capped attempts |
-| `Recover` | `LMOVE processing→main` on startup | re-queue jobs orphaned by a crash |
+| `Retry` | move back to `main` with attempt+1, or to `dead` once attempts run out | bounded retries with backoff |
+| `Recover` | `LMOVE processing→main` at startup | re-queue jobs orphaned by a past crash |
 
-### Why this matters (production reasoning)
-- **At-least-once delivery**: `BLMOVE` is atomic, so a crash between "pop" and "process"
-  doesn't vaporize the job — `Recover()` puts it back on the next boot.
-- **Because delivery is at-least-once, handlers must be idempotent.** The plan handler
-  upserts by `(user_id, plan_date)`, so re-processing the same job is harmless. **This is
-  a rule you must hold in your head whenever you add a new job type.**
-- **Dead-letter list** = jobs that failed `maxAttempts` times or have an unknown type. They
-  don't loop forever; they're parked for inspection.
-- The decision to hand-roll this instead of using `asynq` was deliberate (see
-  `docs/DECISIONS.md`) — the *point* of the project is to show you understand the
-  primitives, not to hide them behind a library.
+Two rules fall out of this design:
+- **Because delivery is at-least-once, every job handler must be idempotent** (safe to run twice). The
+  plan handler upserts by `(user_id, plan_date)`, so re-running it just overwrites — harmless.
+- A **dead-letter list** means failures are *parked for inspection* instead of looping forever.
+
+Try it: `make enqueue n=3 fail=1` then watch the worker logs retry → back off → dead-letter, and check
+`redis-cli LLEN acos:jobs:dead`.
 
 ---
 
-## 6. The AI layer: typed agents, not raw prompts
+## 7. ★ The AI layer — how Claude is wired in (read slowly)
 
-`internal/ai/` keeps Claude well-contained:
-- `client.go` — wraps the Anthropic SDK; one place that knows the API.
-- `prompts.go` — the prompt templates (system + user) as Go strings/builders.
-- `schema.go` — the **JSON schema** the model must return.
-- `agents.go` — typed methods like "plan the day", "prioritize", "break down a task". Each
-  returns a Go struct, not a blob of text.
+This is the part you asked about most. The whole philosophy: **treat the LLM like a typed function.**
+You send structured input, *demand* JSON back, parse it into a Go struct, and validate it. Free text
+never escapes this package.
 
-The production lesson: **treat the LLM like a typed function.** You send structured input,
-demand structured JSON output, parse it into a domain type, and validate. The frontend's
-Zod schemas (`frontend/lib/schemas.ts`) mirror this on the client — and note
-`scheduleItemSchema` uses `.catch("focus")` so an unexpected block type from the model
-degrades gracefully instead of crashing the UI. Defensive parsing on both ends.
+Everything is in `internal/ai/`:
 
-Model choice is config (`ANTHROPIC_MODEL=claude-haiku-4-5-...`) — a credit-efficient model
-for a high-volume background job, swappable without code changes.
+```
+ai/
+├── client.go    the Completer interface + the real Claude client (the ONLY file that knows the SDK)
+├── agents.go    the 4 "agents" (Plan / Prioritize / Break / Report) + the repair loop
+├── prompts.go   the system prompts (versioned) + functions that build the user message
+└── schema.go    the Go structs Claude must return + their Validate() rules + JSON parsing helpers
+```
+
+### 7.1 The `Completer` interface — the key abstraction
+
+```go
+// client.go
+type Completer interface {
+    Complete(ctx context.Context, system, user string) (string, error)
+}
+```
+
+That's the entire surface the rest of the code needs: "give me a system prompt + a user prompt, get
+back text." Two things implement/consume it:
+
+- The **real `Client`** (`client.go`) implements `Complete` by calling the Anthropic Go SDK.
+- In **tests**, a tiny fake implements `Complete` by returning canned JSON — so agent logic is tested
+  with **no API key and no network** (`internal/ai/agents_test.go`).
+
+```go
+type Client struct {
+    api       anthropic.Client   // the official SDK
+    model     anthropic.Model    // e.g. claude-haiku-4-5 (from config)
+    maxTokens int64
+    timeout   time.Duration
+}
+
+func (c *Client) Complete(ctx, system, user string) (string, error) {
+    ctx, cancel := context.WithTimeout(ctx, c.timeout)   // never hang forever
+    defer cancel()
+    resp, err := c.api.Messages.New(ctx, anthropic.MessageNewParams{
+        Model: c.model, MaxTokens: c.maxTokens,
+        System:   []anthropic.TextBlockParam{{Text: system}},
+        Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},
+    })
+    // ... concatenate the text blocks of the response and return the string
+}
+```
+
+> 🟢 **Node → Go:** this is the same idea as injecting a mock OpenAI client, but the "interface" is a
+> first-class language feature, so the fake is guaranteed to match the real shape at compile time.
+
+### 7.2 The 4 agents — typed in, typed out
+
+`Agents` is just a struct wrapping a `Completer`:
+```go
+type Agents struct { c Completer }
+```
+Each method is a real, typed function:
+
+| Agent | Method | Returns | Used by |
+|---|---|---|---|
+| **Planner** | `Plan(ctx, PlanInput)` | `Schedule` | the **worker** (async) |
+| **Priority** | `Prioritize(ctx, []Task)` | `PriorityResult` | the **server** (sync) |
+| **Breakdown** | `Break(ctx, Task)` | `Breakdown` | the **server** (sync) |
+| **Reporter** | `Report(ctx, ReportInput)` | `WeeklyReport` | the **server** (sync) |
+
+Each output is a plain Go struct in `schema.go`, e.g.:
+```go
+type Schedule struct {
+    Date     string         `json:"date"`
+    Schedule []ScheduleItem `json:"schedule"`   // each: time, task, type(focus|rest|admin…)
+    Summary  string         `json:"summary"`
+}
+func (s Schedule) Validate() error { /* date present? at least one block? valid type? */ }
+```
+
+### 7.3 The strict-JSON + repair loop (the clever bit)
+
+LLMs *usually* return valid JSON when asked, but not always — sometimes they wrap it in ```` ```json ````
+fences or add a sentence. So every agent runs this loop (`agents.go`):
+
+```go
+func (a *Agents) runWithRepair(ctx, system, user string, parse func(raw string) error) error {
+    raw, err := a.c.Complete(ctx, system, user)        // 1. ask Claude
+    if err != nil { return err }
+    if perr := parse(raw); perr == nil { return nil }  // 2. try to parse+validate → success
+    // 3. ONE repair attempt: tell Claude what was wrong and ask again
+    raw2, err := a.c.Complete(ctx, system, repairUser(user, raw, perr))
+    if err != nil { return err }
+    return parse(raw2)                                  // 4. parse the corrected reply
+}
+```
+
+And `parse` is `parseStrict` from `schema.go`:
+```go
+func parseStrict[T validatable](raw string, v *T) error {
+    js := extractJSON(raw)                  // strip ```json fences / prose, keep { ... }
+    if err := json.Unmarshal([]byte(js), v); err != nil { return err }  // text → struct
+    return (*v).Validate()                  // business rules (non-empty, valid enum, …)
+}
+```
+
+So the pipeline for every agent is:
+
+```
+build prompt → Claude → extractJSON → json.Unmarshal → Validate
+                                   └─ if any step fails ─▶ one repair round-trip ─▶ try again
+                                                                              └─ still bad ▶ return error
+```
+
+That's the production lesson: **never trust raw model text** — fence-strip, unmarshal into a typed
+struct, validate, and have a fallback. (The frontend mirrors this with Zod; §8.)
+
+### 7.4 Prompts are versioned Go strings
+
+`prompts.go` holds each system prompt as a constant with a version (`planner-v1`, `reporter-v1`…), plus
+builder functions that turn Go data into the user message:
+```go
+func buildPlannerUser(in PlanInput) string {
+    s := fmt.Sprintf("Date: %s\nAvailable time: %d\nGoals: %s\nTasks: %s", ...)
+    if g := modeGuidance(in.Mode); g != "" { s += "\nPlanning mode: " + g }  // ← focus modes!
+    return s
+}
+```
+`modeGuidance` is how **Focus modes** work: `deep_focus` / `stress_relief` / `light` each append a
+different instruction to the prompt. No new agent — just a different sentence appended.
+
+### 7.5 Sync vs async — two ways the same agents get called
+
+This is the integration question. The exact same `ai.Agents` is wired in two places:
+
+- **Async (daily plan):** heavy + benefits from retries/durability → goes through the **queue**. The
+  **worker** builds the agents and calls `agents.Plan(...)` inside `PlanHandler`.
+- **Sync (prioritize / breakdown / weekly report):** fast, one-shot, results are ephemeral (shown in
+  the UI, not stored) → the **server** builds the agents and calls them *inside the HTTP request*. The
+  browser shows a spinner for ~2s and gets the answer directly.
+
+Both `cmd/server/main.go` and `cmd/worker/main.go` do the same setup:
+```go
+if cfg.AnthropicAPIKey != "" {
+    client, _ := ai.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicModel)
+    agents = ai.NewAgents(client)
+}
+// pass `agents` into the service. If the key is missing, agents is nil →
+// the AI endpoints return 503 "unavailable" instead of crashing.
+```
+Why split this way? See `docs/DECISIONS.md` **ADR-011**: queue the heavy job; let cheap interactive
+calls answer directly. The "never block on AI" rule is about not coupling *cheap CRUD* to AI, not about
+forbidding a dedicated AI endpoint from awaiting its own result.
+
+**The model is config**, not code: `ANTHROPIC_MODEL=claude-haiku-4-5-…` — a credit-efficient model,
+swappable without recompiling.
 
 ---
 
-## 7. Config, errors, and other production habits worth copying
+## 8. ★ How the frontend talks to the backend (the round trip)
 
-### Typed config (`internal/config`)
-Env vars are loaded **once** into a typed `Config` struct and validated at boot. If a
-required var is missing, the process exits immediately with a clear error — **fail fast**,
-never discover a missing secret three requests deep.
-> 🟢 Node habit of reading `process.env.FOO` scattered across files → centralized, typed,
-> validated once. Much easier to reason about.
+The second thing you asked about. Five pieces cooperate.
 
-### Sentinel errors + wrapping (`internal/domain/errors.go`)
-The codebase defines errors like `domain.ErrValidation`, `domain.ErrNotFound`. Services
-return these; handlers map them to HTTP status codes with `errors.Is(...)`. Lower layers
-*wrap* with context: `fmt.Errorf("upsert plan: %w", err)`. The `%w` verb preserves the
-chain so `errors.Is` still works at the top.
-> 🟢 Node → Go: instead of throwing/catching, Go returns `error` as the last value and you
-> check it explicitly (`if err != nil`). Verbose, but the control flow is always visible —
-> no invisible exception bubbling.
+### 8.1 The proxy — why there's no CORS
 
-### Structured logging (`log/slog`)
-`platform/logger` builds an `slog.Logger`. Logs are key/value (`"job_id", id`), not string
-soup — greppable and machine-parseable, which is what real log pipelines want.
+`frontend/next.config.ts`:
+```ts
+async rewrites() {
+  return [{ source: "/api/:path*", destination: "http://localhost:8080/:path*" }];
+}
+```
+The browser only ever calls **its own origin** (`localhost:3000/api/...`). Next.js forwards those to
+the Go backend server-side. So the browser never makes a cross-origin call → **no CORS headers to
+configure**, and the backend URL is a deploy-time setting, not baked into the JS bundle.
+> *CORS = the browser's rule that a page on site A can't freely call site B. The proxy sidesteps it by
+> making everything look like "site A."*
 
-### Middleware you should recognize
-`RequestID` (trace one request across logs), `Logger` (access logs), `Recovery` (turn a
-panic into a 500 instead of crashing the server). Standard production hygiene.
+### 8.2 The typed API client — one function for every call
 
-### Graceful HTTP shutdown (`cmd/server/main.go`)
-On signal: `srv.Shutdown(ctx)` with a 10s timeout — stops accepting new connections, lets
-in-flight requests finish. Paired with the worker's graceful drain, the whole system stops
-cleanly. This is what lets you deploy/restart without dropping user requests.
+`frontend/lib/api.ts` has a single `request()` helper and then one tiny method per endpoint:
+```ts
+async function request<T>(path, { method, body, token, schema }) {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", Authorization: token && `Bearer ${token}` },
+    body: body && JSON.stringify(body),
+  });
+  if (!res.ok) {                                   // backend sent an error envelope
+    const { error } = await res.json();            // { error: { code, message } }
+    throw new ApiError(res.status, error.code, error.message);
+  }
+  const json = await res.json();
+  return schema ? schema.parse(json) : json;       // ← Zod validates the response shape
+}
+
+export const api = {
+  generatePlan: (t, input) => request("/plans/generate", { method:"POST", body:input, token:t, schema: planJobSchema }),
+  stats:        (t)        => request("/stats", { token:t, schema: statsSchema }),
+  prioritize:   (t)        => request("/ai/prioritize", { method:"POST", token:t, schema: priorityResultSchema }),
+  // …one line per endpoint
+};
+```
+Two things to notice:
+- **Auth token** is attached as `Authorization: Bearer <jwt>` on every call.
+- The backend's **error envelope** is one consistent shape `{ "error": { "code", "message" } }`
+  (built in `internal/http/handler/handler.go`), so the client maps any failure to one `ApiError`.
+
+### 8.3 Zod — validate responses at the boundary
+
+`frontend/lib/schemas.ts` declares the expected shape of every response, and `request()` runs
+`schema.parse(json)`. If the backend ever sends an unexpected shape, it fails **loudly at one spot**
+instead of becoming `undefined` deep inside a component. It's the client-side mirror of the server's
+`Validate()` — defensive parsing on *both* ends of the wire.
+
+### 8.4 TanStack Query — caching, polling, invalidation
+
+React components don't call `api.*` directly in `useEffect`. They use **TanStack Query**, which owns
+"server state": caching, loading flags, refetching, and polling. Two primitives:
+
+- **`useQuery`** = "read something and cache it":
+  ```ts
+  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: () => api.listTasks(token) });
+  ```
+- **`useMutation`** = "change something, then refresh":
+  ```ts
+  const create = useMutation({
+    mutationFn: (input) => api.createTask(token, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }),  // ← re-fetch the list
+  });
+  ```
+
+**Polling is declarative.** The plan panel polls the job *only while it's running*:
+```ts
+const jobQuery = useQuery({
+  queryKey: ["plan-job", planId],
+  queryFn: () => api.getPlanJob(token, planId),
+  enabled: !!planId && inProgress,
+  refetchInterval: (q) => {
+    const s = q.state.data?.status;
+    return s === "queued" || s === "running" ? 1500 : false;   // poll, or stop
+  },
+});
+```
+No manual `setInterval`, no "isPolling" boolean — you describe *when* to poll and the library does it.
+That's the same async result the worker produced in §3, surfaced in the UI.
+
+### 8.5 The auth token flow (login → every request → logout)
+
+```
+register/login form ─POST /api/auth/register─▶ backend returns { user, token (JWT) }
+        │
+        ▼  signIn({token, user})                     frontend/lib/auth.tsx
+   localStorage["acos.auth"] = {token, user}
+        │
+        ▼  useAuth() reads it via useSyncExternalStore (SSR-safe, no flash)
+   every api.* call attaches  Authorization: Bearer <token>
+        │
+        ▼  middleware.Auth verifies the JWT, puts userID in the request context
+   handlers read userID → every query is scoped to that user
+        │
+        ▼  signOut() clears localStorage → all calls now 401 → guards redirect to /login
+```
+
+`auth.tsx` keeps the session in `localStorage` and exposes it with **`useSyncExternalStore`** (React's
+official way to read external mutable state) so there's no hydration flash and no `AuthProvider`
+needed. Pages guard themselves: the dashboard redirects to `/login` if there's no token.
 
 ---
 
-## 8. The frontend, briefly (where the production thinking is)
+## 9. A feature tour — see the pattern repeat
 
-- **App Router + `"use client"`** islands. Server components by default; interactive panels
-  opt into the client.
-- **TanStack Query** owns *server state* — caching, polling, invalidation. You saw it drive
-  the plan-status poll declaratively (poll *because* status is in-progress, not via a
-  manual `setInterval` flag). Study `plan-panel.tsx` for this pattern.
-- **Zod** validates every API response at the boundary, so bad data fails loudly at one
-  spot instead of producing `undefined` deep in a component.
-- **The `/api/*` rewrite** (`next.config.ts`) means the browser only ever talks to its own
-  origin → no CORS, and the backend URL is a deploy-time concern, not baked into the bundle.
-- **JWT in localStorage** (`lib/auth.tsx`) — simple for a portfolio app. (In a hardened
-  prod app you'd weigh httpOnly cookies for XSS resistance — a good thing to know the
-  tradeoff of.)
+Every feature is the *same layered path*. Once you see it 3 times it's automatic.
 
----
+| Feature | DB | Service | HTTP | Frontend | AI? |
+|---|---|---|---|---|---|
+| **Tasks CRUD** | `tasks` table | `TaskService` | `/tasks…` | `task-panel.tsx` | no |
+| **Daily plan** | `daily_plans` (+ queue) | `PlanService` + worker `PlanHandler` | `/plans/generate`, `/plans/jobs/:id` | `plan-panel.tsx` (polls) | **Planner** (async) |
+| **Prioritize** | reads `tasks` | `AIService.Prioritize` | `POST /ai/prioritize` | Prioritize button + rank badges | **Priority** (sync) |
+| **Breakdown** | reads one task | `AIService.Breakdown` | `POST /ai/breakdown/:id` | per-task expander | **Breakdown** (sync) |
+| **Analytics** | SQL aggregation over `tasks`/`daily_plans` | `StatsService` | `GET /stats` | Insights panel (ring, bars) | no |
+| **Focus modes** | (none) | `mode` flows in the job payload | `mode` on `/plans/generate` | mode selector | reshapes Planner prompt |
+| **Weekly report** | reads stats + tasks | `AIService.WeeklyReport` | `POST /ai/weekly-report` | "Weekly review" card | **Reporter** (sync) |
+| **Habits** | `habits` + `habit_checkins` | `HabitService` (streak logic) | `/habits…`, `/habits/:id/checkin` | streak grid `habits-panel.tsx` | no |
 
-## 9. Testing strategy (look at the `_test.go` files)
+Two are worth a closer look:
 
-Go keeps tests **next to the code** (`pool_test.go` beside `pool.go`). ACOS has three tiers:
-- **Unit** (fast, no I/O): services tested against fakes (`service/fake_test.go`,
-  `service/*_test.go`). Run with `make test-unit` (`-short`).
-- **Integration**: `repository_test.go`, `queue_test.go` spin up real Postgres/Redis via
-  **testcontainers** (needs Docker). This tests the actual SQL and Redis behavior, not a
-  mock of it.
-- **Live**: `ai/live_test.go` hits the real Claude API (gated, opt-in — costs credits).
-
-> 🟢 Node → Go: no Jest/Mocha — testing is in the standard library (`testing` package +
-> `go test`). Table-driven tests are the idiom. `-short` is the convention for skipping
-> slow/integration tests.
+- **Analytics** shows off *SQL doing the work*: one aggregation query with `COUNT(*) FILTER (WHERE …)`
+  and a `GROUP BY day` returns counts, the priority mix, and a 7-day trend. The Go service just
+  zero-fills missing days and computes the percentage. (`internal/repository/queries/stats.sql`)
+- **Habits** is a full new domain: two tables, a check-in is a row in `habit_checkins (habit_id, day)`
+  with a unique key (so checking twice is harmless). The **streak** is computed in Go
+  (`currentStreak` in `service/habit.go`): count consecutive days backward from today (a streak stays
+  "alive" until today is over). The grid UI just colors the days that have a check-in.
 
 ---
 
-## 10. A study plan (do this, in order)
+## 10. Production habits worth copying (the small stuff that matters)
 
-1. **Run it and break it.** You already have it running. In Adminer, watch
-   `daily_plans.status` flip queued→running→done as you click Generate.
-2. **Trace one request** with the file map in §2 open. Put a `log.Info` in the handler,
-   service, and worker handler; watch the order they fire (and that the last two are in a
-   *different process*).
-3. **Read `pool.go` line by line.** It's the densest, most valuable file. Re-read §4 after.
-4. **Add a feature** to cement it. Suggested: a `weekly report` job — new migration, new
-   `.sql` query (`make sqlc`), a service method, an HTTP route, a new worker handler, and a
-   panel. You'll touch every layer exactly once. (This is literally Batch 6 in the tracker.)
-5. **Deliberately fail a job.** `make enqueue n=3 fail=1` and watch the retry → backoff →
-   dead-letter path in the worker logs and the `acos:jobs:dead` Redis list.
+- **Typed config, validated at boot** (`internal/config`): all env in one struct; a missing required
+  var exits immediately with a clear message — *fail fast*, don't discover it three requests deep.
+- **Sentinel errors + `%w` wrapping** (`domain/errors.go`): services return `domain.ErrNotFound` etc.;
+  lower layers wrap with context (`fmt.Errorf("get task: %w", err)`); the handler maps them to status
+  codes with `errors.Is`. `%w` keeps the chain intact.
+  > 🟢 **Node → Go:** instead of throw/catch, Go returns `error` as the last value and you check
+  > `if err != nil`. Verbose, but the control flow is always visible — no invisible exception bubbling.
+- **Structured logging** (`log/slog`): logs are key/value (`"plan_id", id`), greppable and
+  machine-parseable.
+- **Middleware** (`internal/http/middleware`): `RequestID` (trace one request across logs), `Logger`
+  (access logs), `Recovery` (panic → 500, not a crash), `Auth` (verify JWT, set userID).
+- **Graceful HTTP shutdown** (`cmd/server/main.go`): on signal, `srv.Shutdown(ctx)` stops accepting
+  new connections and lets in-flight requests finish — deploy/restart without dropping requests.
 
-### Companion docs already in this repo
+---
+
+## 11. Auth, explained simply (JWT)
+
+A **JWT** (JSON Web Token) is a signed string that says "this is user X" without the server storing a
+session. Flow:
+
+1. You log in → the server checks your password (bcrypt-hashed in `users.password_hash`) and, if good,
+   **signs** a token containing your user id with a secret key (`auth/token.go`, `JWT_SECRET`).
+2. The browser stores that token and sends it on every request (`Authorization: Bearer …`).
+3. `middleware.Auth` **verifies the signature** (proving the token wasn't forged) and extracts the
+   user id into the request context. Handlers read it, so every DB query is automatically scoped to
+   *your* data.
+
+Because the token is signed (not encrypted), the server doesn't need to remember sessions — it just
+re-verifies the signature each time. That's *stateless auth*. (Trade-off: storing it in `localStorage`
+is simple but XSS-exposed; an httpOnly cookie is more hardened — a good tradeoff to know.)
+
+---
+
+## 12. Testing strategy
+
+Go keeps tests **next to the code** (`pool_test.go` beside `pool.go`). Three tiers:
+- **Unit** (fast, no I/O): services against fakes (`service/*_test.go`, `service/fake_test.go`).
+  `make test-unit` (`-short`).
+- **Integration** (real infra via **testcontainers**, needs Docker): `repository_test.go` runs the
+  actual SQL against a throwaway Postgres; `queue_test.go`/`pool_test.go` use a fake Redis.
+- **Live** (opt-in, costs credits): `ai/live_test.go` hits the real Claude API; skipped unless a key is
+  present.
+
+`make test` runs everything (45 tests today). `go test ./...` is the whole command — no Jest/Mocha;
+testing is in Go's standard library.
+
+---
+
+## 13. Glossary (plain-English, in one place)
+
+- **goroutine** — a function running concurrently; very cheap, so you can have thousands.
+- **channel** — a typed pipe goroutines use to pass data safely without locks.
+- **`context.Context`** — a value threaded through calls carrying cancellation + deadlines; how Go
+  does timeouts and graceful shutdown.
+- **interface** — a list of method names; any type with those methods "satisfies" it. Enables fakes
+  in tests (`Querier`, `Completer`, `Enqueuer`).
+- **idempotent** — running it twice has the same effect as once (required because the queue may deliver
+  a job more than once).
+- **migration** — a numbered SQL file that changes the DB structure; applied in order, reversible.
+- **sqlc** — a tool that generates type-safe Go functions from your `.sql` files.
+- **pgx / pool** — the Postgres driver; the pool keeps a few open connections to reuse.
+- **JSONB** — Postgres's binary JSON column type; the generated plan is stored as JSONB.
+- **`BLMOVE`** — a Redis command that atomically moves an item between lists, blocking until one
+  exists; the heart of the reliable queue.
+- **at-least-once** — the queue guarantees a job runs *at least* once (maybe more) → handlers must be
+  idempotent.
+- **dead-letter** — a list where jobs that failed too many times are parked for inspection.
+- **middleware** — a function that wraps every request (logging, auth, recovery) before the handler.
+- **JWT** — a signed token proving who you are without server-side sessions.
+- **CORS** — the browser rule blocking cross-origin calls; sidestepped here by the `/api` proxy.
+- **TanStack Query** — the React library managing server data (cache/poll/invalidate).
+- **Zod** — a TypeScript library that validates a value matches an expected shape at runtime.
+- **hydration** — React reconciling server-rendered HTML with client JS on first load.
+
+---
+
+## 14. A study plan (do these in order)
+
+1. **Run it and watch the DB.** Open Adminer (`localhost:8081`) and watch `daily_plans.status` flip
+   `queued → running → done` as you click **Generate plan**.
+2. **Trace one request** with §3 open. Add a `log.Info` in the handler, the service, and the worker
+   handler; notice the last two fire in a *different process*.
+3. **Read `internal/worker/pool.go` and `internal/ai/agents.go` line by line** — the two densest,
+   highest-value files. Re-read §5 and §7 after.
+4. **Break a job on purpose:** `make enqueue n=3 fail=1` → watch retry → backoff → dead-letter in the
+   worker logs and `redis-cli LLEN acos:jobs:dead`.
+5. **Add a tiny feature** to cement the pattern (e.g. a "notes" field on a task): migration → `.sql`
+   query → `make sqlc` → service method → HTTP route → a frontend input. You'll touch every layer once.
+
+### Companion docs
 | Doc | Read it for |
 |---|---|
-| `docs/ARCHITECTURE.md` | the system design in more detail |
-| `docs/DECISIONS.md` | *why* sqlc/custom-queue/JWT were chosen (the tradeoffs) |
-| `docs/AI_DESIGN.md` | the Claude agents, prompts, and JSON contracts |
-| `docs/API.md` | every REST endpoint |
-| `docs/SETUP.md` | environment setup details |
-| `docs/TRACKER.md` | what's done and what's next |
+| `docs/ARCHITECTURE.md` | the system design, more formally |
+| `docs/DECISIONS.md` | *why* each choice was made (11 ADRs incl. sync-vs-async AI) |
+| `docs/AI_DESIGN.md` | the agents, prompts, JSON contracts |
+| `docs/API.md` | every REST endpoint with examples |
+| `docs/SETUP.md` | environment + run instructions |
+| `docs/TRACKER.md` | what's built (Batches 0–7) and what's left |
 
 ---
 
-## 11. The ten ideas to walk away with
+## 15. The dozen ideas to walk away with
 
 1. **`cmd/` + `internal/`** = many binaries, one shared private library.
 2. **Layered, inward-pointing dependencies**; `domain` depends on nothing.
-3. **Interfaces at the seams** (`Querier`, `Enqueuer`) make everything testable.
+3. **Interfaces at the seams** (`Querier`, `Completer`, `Enqueuer`) make everything testable.
 4. **Fast HTTP + deferred work via a durable queue** is the core scaling pattern.
-5. **Goroutines + an unbuffered channel** give you a worker pool with built-in backpressure.
-6. **`context.Context`** threads cancellation/timeouts through every layer; it's how Go does
-   graceful shutdown.
+5. **Goroutines + an unbuffered channel** = a worker pool with built-in backpressure.
+6. **`context.Context`** threads cancellation/timeouts through every layer.
 7. **At-least-once delivery ⟹ idempotent handlers.** Always.
-8. **Explicit errors with `%w` wrapping + sentinel `errors.Is`** beats invisible exceptions.
+8. **Explicit errors with `%w` + `errors.Is`** beat invisible exceptions.
 9. **sqlc**: real SQL, compile-time-checked, no ORM magic.
-10. **Validate at every boundary** (Zod on the client, typed structs + schema on the server,
+10. **Treat the LLM as a typed function:** structured prompt → JSON → struct → validate → repair.
+11. **Same agents, two integrations:** queue the heavy plan, await the cheap interactive calls.
+12. **Validate at every boundary** (Zod on the client, typed structs + `Validate()` on the server,
     parsed LLM output) so bad data dies early and loudly.
 ```
